@@ -106,3 +106,94 @@ Key configuration options in `.env`:
 - `DATABASE_URL`: PostgreSQL connection string
 - `OPENAI_API_KEY`: For vector embeddings
 - `BASE_PATH`: Base path for API routes
+
+## Docker Development Setup
+
+**IMPORTANT**: All development should be done using Docker containers. Local pnpm/npm commands should NOT be used directly.
+
+### Docker Development Commands
+
+#### Quick Start
+```bash
+# Start development environment (recommended)
+./docker-dev.sh start
+
+# Stop development environment
+./docker-dev.sh stop
+
+# View logs
+./docker-dev.sh logs
+
+# Access container shell
+./docker-dev.sh shell
+```
+
+#### Alternative Commands
+```bash
+# Using Makefile
+make dev        # Start development environment
+make stop       # Stop environment  
+make logs       # View logs
+make shell      # Access container shell
+make test       # Run tests in Docker
+make lint       # Run linter in Docker
+
+# Using docker compose directly
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+```
+
+### Access URLs
+- **Frontend UI (production build)**: http://localhost:3000
+- **Frontend Dev Server (hot reload)**: http://localhost:5173
+- **Backend API**: http://localhost:3000
+- **PostgreSQL**: postgresql://mcphub:mcphub_password@localhost:5432/mcphub
+
+### Docker Configuration Files
+- **docker-compose.yml**: Production setup with PostgreSQL + pgvector
+- **docker-compose.dev.yml**: Development override with hot reload support
+- **Dockerfile**: Production image build
+- **Dockerfile.dev**: Development image build
+- **docker-dev.sh**: Helper script for common Docker operations
+- **Makefile**: Make targets for Docker commands
+
+### Frontend Development Notes
+- The production build is served at http://localhost:3000 by the backend
+- Hot reload development server runs on http://localhost:5173
+- Frontend must be built inside the container: `docker compose exec mcphub sh -c "cd /app/frontend && pnpm build"`
+- Changes to frontend source files are automatically reflected via volume mounts
+
+### Running Commands in Container
+**Always execute development commands inside the Docker container:**
+```bash
+# Run tests
+./docker-dev.sh test
+# OR
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm mcphub pnpm test
+
+# Run linter
+./docker-dev.sh lint
+# OR  
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm mcphub pnpm lint
+
+# Build frontend
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub sh -c "cd /app/frontend && pnpm build"
+
+# Install new dependencies
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub pnpm install <package-name>
+```
+
+### Troubleshooting
+- If frontend shows "not found", run the frontend build inside the container and restart
+- Volume mounts ensure code changes are reflected without rebuilding the image
+- Database data persists in `postgres-data-dev` Docker volume
+- Use `./docker-dev.sh clean` to reset environment completely
+
+### Database Access
+```bash
+# Access PostgreSQL shell
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec postgres psql -U mcphub -d mcphub
+
+# Or using the script
+./docker-dev.sh db-shell  # (if implemented)
+```
