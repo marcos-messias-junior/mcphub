@@ -2,7 +2,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import ThemeSwitch from '@/components/ui/ThemeSwitch';
 import LanguageSwitch from '@/components/ui/LanguageSwitch';
-import GitHubIcon from '@/components/icons/GitHubIcon';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -38,15 +37,6 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
               : `v${import.meta.env.PACKAGE_VERSION}`}
           </span>
 
-          <a
-            href="https://github.com/samanhappy/mcphub"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-2 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-            aria-label="GitHub Repository"
-          >
-            <GitHubIcon className="h-5 w-5" />
-          </a>
           <ThemeSwitch />
           <LanguageSwitch />
         </div>

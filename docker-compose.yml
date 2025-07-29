@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  mcphub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcphub:local
+    container_name: mcphub
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this}
+      - DATABASE_URL=postgresql://mcphub:mcphub_password@postgres:5432/mcphub?schema=public
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - BASE_PATH=${BASE_PATH:-}
+    volumes:
+      - ./mcp_settings.json:/app/mcp_settings.json
+      - ./data:/app/data
+      - ./servers.json:/app/servers.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mcphub-network
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mcphub-postgres
+    environment:
+      - POSTGRES_USER=mcphub
+      - POSTGRES_PASSWORD=mcphub_password
+      - POSTGRES_DB=mcphub
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcphub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - mcphub-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: mcphub-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - mcphub
+    restart: unless-stopped
+    networks:
+      - mcphub-network
+    profiles:
+      - with-nginx
+
+volumes:
+  postgres-data:
+    driver: local
+
+networks:
+  mcphub-network:
+    driver: bridge
