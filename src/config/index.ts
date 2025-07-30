@@ -9,7 +9,7 @@ import { DataService } from '../services/dataService.js';
 dotenv.config();
 
 const defaultConfig = {
-  port: process.env.PORT || 3000,
+  port: process.env.PORT || 80,
   initTimeout: process.env.INIT_TIMEOUT || 300000,
   timeout: process.env.REQUEST_TIMEOUT || 60000,
   basePath: process.env.BASE_PATH || '',

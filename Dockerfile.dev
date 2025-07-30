@@ -22,7 +22,7 @@ COPY . .
 RUN cp /app/frontend/vite.config.docker.ts /app/frontend/vite.config.ts
 
 # Expose ports
-EXPOSE 3000 5173
+EXPOSE 80 5173
 
 # Start development servers
 CMD ["pnpm", "dev"]

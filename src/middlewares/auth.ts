@@ -43,7 +43,15 @@ export const auth = (req: Request, res: Response, next: NextFunction): void => {
   // Get token from header or query parameter
   const headerToken = req.header('x-auth-token');
   const queryToken = req.query.token as string;
-  const token = headerToken || queryToken;
+  
+  // Also check for Bearer token in Authorization header
+  const authHeader = req.headers.authorization;
+  let bearerToken = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    bearerToken = authHeader.substring(7);
+  }
+  
+  const token = headerToken || queryToken || bearerToken;
 
   // Check if no token
   if (!token) {

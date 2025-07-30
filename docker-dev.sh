@@ -35,7 +35,7 @@ case "$1" in
         print_info "Starting MCPHub development environment..."
         docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
         print_info "Building frontend for production access..."
-        docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub sh -c "cd /app/frontend && pnpm build"
+        docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub pnpm frontend:build
         docker compose -f docker-compose.yml -f docker-compose.dev.yml restart mcphub
         print_info "Development environment started!"
         print_info "Frontend (production build): http://localhost:3000"
@@ -54,7 +54,7 @@ case "$1" in
         print_info "Rebuilding and starting MCPHub development environment..."
         docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
         print_info "Building frontend..."
-        docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub sh -c "cd /app/frontend && pnpm build"
+        docker compose -f docker-compose.yml -f docker-compose.dev.yml exec mcphub pnpm frontend:build
         docker compose -f docker-compose.yml -f docker-compose.dev.yml restart mcphub
         print_info "Environment rebuilt and started!"
         ;;

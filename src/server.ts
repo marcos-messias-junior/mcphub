@@ -2,6 +2,8 @@ import express from 'express';
 import config from './config/index.js';
 import path from 'path';
 import fs from 'fs';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger.js';
 import { initUpstreamServers, connected } from './services/mcpService.js';
 import { initMiddlewares } from './middlewares/index.js';
 import { initRoutes } from './routes/index.js';
@@ -35,6 +37,13 @@ export class AppServer {
       await initializeDefaultUser();
 
       initMiddlewares(this.app);
+      
+      // Setup Swagger UI before other routes
+      this.app.use(`${this.basePath}/api-docs`, swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+        customCss: '.swagger-ui .topbar { display: none }',
+        customSiteTitle: 'MCPHub API Documentation',
+      }));
+      
       initRoutes(this.app);
       console.log('Server initialized successfully');
 

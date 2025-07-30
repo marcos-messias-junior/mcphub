@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   mcphub:
-    image: mcphub:local
+    image: mcphub:dev
     container_name: mcphub-dev
     ports:
-      - "3000:3000"
+      - "3000:80"
       - "5173:5173"
     environment:
       - NODE_ENV=development
-      - PORT=3000
+      - PORT=80
       - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this}
       - DATABASE_URL=postgresql://mcphub:mcphub_password@postgres:5432/mcphub?schema=public
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -29,6 +27,11 @@ services:
     restart: unless-stopped
     networks:
       - mcphub-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mcphub.rule=Host(`mcphub.local`)"
+      - "traefik.http.services.mcphub.loadbalancer.server.port=80"
+      - "traefik.http.routers.mcphub.entrypoints=web"
 
   postgres:
     image: pgvector/pgvector:pg16
