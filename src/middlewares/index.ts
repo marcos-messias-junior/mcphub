@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { auth } from './auth.js';
 import { userContextMiddleware } from './userContext.js';
-import { initializeDefaultUser } from '../models/User.js';
+import { i18nMiddleware } from './i18n.js';
 import config from '../config/index.js';
 
 export const errorHandler = (
@@ -18,6 +18,9 @@ export const errorHandler = (
 };
 
 export const initMiddlewares = (app: express.Application): void => {
+  // Apply i18n middleware first to detect language for all requests
+  app.use(i18nMiddleware);
+
   // Serve static files from the dynamically determined frontend path
   // Note: Static files will be handled by the server directly, not here
 
@@ -42,15 +45,10 @@ export const initMiddlewares = (app: express.Application): void => {
     }
   });
 
-  // Initialize default admin user if no users exist
-  initializeDefaultUser().catch((err) => {
-    console.error('Error initializing default user:', err);
-  });
-
   // Protect API routes with authentication middleware, but exclude auth endpoints
   app.use(`${config.basePath}/api`, (req, res, next) => {
-    // Skip authentication for login and register endpoints
-    if (req.path === '/auth/login' || req.path === '/auth/register') {
+    // Skip authentication for login endpoint
+    if (req.path === '/auth/login') {
       next();
     } else {
       // Apply authentication middleware first

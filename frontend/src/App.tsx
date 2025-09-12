@@ -1,8 +1,9 @@
 import React from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useParams } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { ServerProvider } from './contexts/ServerContext';
 import MainLayout from './layouts/MainLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
@@ -15,11 +16,18 @@ import MarketPage from './pages/MarketPage';
 import LogsPage from './pages/LogsPage';
 import { getBasePath } from './utils/runtime';
 
+// Helper component to redirect cloud server routes to market
+const CloudRedirect: React.FC = () => {
+  const { serverName } = useParams<{ serverName: string }>();
+  return <Navigate to={`/market/${serverName}?tab=cloud`} replace />;
+};
+
 function App() {
   const basename = getBasePath();
   return (
     <ThemeProvider>
       <AuthProvider>
+      <ServerProvider>
         <ToastProvider>
           <Router basename={basename}>
             <Routes>
@@ -35,6 +43,12 @@ function App() {
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/market" element={<MarketPage />} />
                   <Route path="/market/:serverName" element={<MarketPage />} />
+                  {/* Legacy cloud routes redirect to market with cloud tab */}
+                  <Route path="/cloud" element={<Navigate to="/market?tab=cloud" replace />} />
+                  <Route
+                    path="/cloud/:serverName"
+                    element={<CloudRedirect />}
+                  />
                   <Route path="/logs" element={<LogsPage />} />
                   <Route path="/settings" element={<SettingsPage />} />
                 </Route>
@@ -45,6 +59,7 @@ function App() {
             </Routes>
           </Router>
         </ToastProvider>
+        </ServerProvider>
       </AuthProvider>
     </ThemeProvider>
   );

@@ -17,7 +17,7 @@ const GroupsPage: React.FC = () => {
     deleteGroup,
     triggerRefresh
   } = useGroupData();
-  const { servers } = useServerData();
+  const { servers } = useServerData({ refreshOnMount: true });
 
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -32,9 +32,9 @@ const GroupsPage: React.FC = () => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    const success = await deleteGroup(groupId);
-    if (!success) {
-      setGroupError(t('groups.deleteError'));
+    const result = await deleteGroup(groupId);
+    if (!result || !result.success) {
+      setGroupError(result?.message || t('groups.deleteError'));
     }
   };
 

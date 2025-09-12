@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import fs from 'fs';
-import { McpSettings } from '../types/index.js';
+import { McpSettings, IUser } from '../types/index.js';
 import { getConfigFilePath } from '../utils/path.js';
 import { getPackageVersion } from '../utils/version.js';
 import { getDataService } from '../services/services.js';
@@ -11,8 +11,8 @@ dotenv.config();
 const defaultConfig = {
   port: process.env.PORT || 80,
   initTimeout: process.env.INIT_TIMEOUT || 300000,
-  timeout: process.env.REQUEST_TIMEOUT || 60000,
   basePath: process.env.BASE_PATH || '',
+  readonly: 'true' === process.env.READONLY || false,
   mcpHubName: 'mcphub',
   mcpHubVersion: getPackageVersion(),
 };
@@ -53,14 +53,14 @@ export const loadOriginalSettings = (): McpSettings => {
   }
 };
 
-export const loadSettings = (): McpSettings => {
-  return dataService.filterSettings!(loadOriginalSettings());
+export const loadSettings = (user?: IUser): McpSettings => {
+  return dataService.filterSettings!(loadOriginalSettings(), user);
 };
 
-export const saveSettings = (settings: McpSettings): boolean => {
+export const saveSettings = (settings: McpSettings, user?: IUser): boolean => {
   const settingsPath = getSettingsPath();
   try {
-    const mergedSettings = dataService.mergeSettings!(loadOriginalSettings(), settings);
+    const mergedSettings = dataService.mergeSettings!(loadOriginalSettings(), settings, user);
     fs.writeFileSync(settingsPath, JSON.stringify(mergedSettings, null, 2), 'utf8');
 
     // Update cache after successful save

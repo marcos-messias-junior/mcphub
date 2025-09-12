@@ -1,25 +1,26 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useServerData } from '@/hooks/useServerData';
+import { Server } from '@/types';
 
 const DashboardPage: React.FC = () => {
   const { t } = useTranslation();
-  const { servers, error, setError, isLoading } = useServerData();
+  const { servers, error, setError, isLoading } = useServerData({ refreshOnMount: true });
 
   // Calculate server statistics
   const serverStats = {
     total: servers.length,
-    online: servers.filter(server => server.status === 'connected').length,
-    offline: servers.filter(server => server.status === 'disconnected').length,
-    connecting: servers.filter(server => server.status === 'connecting').length
+    online: servers.filter((server: Server) => server.status === 'connected').length,
+    offline: servers.filter((server: Server) => server.status === 'disconnected').length,
+    connecting: servers.filter((server: Server) => server.status === 'connecting').length
   };
 
   // Map status to translation keys
-  const statusTranslations = {
+  const statusTranslations: Record<string, string> = {
     connected: 'status.online',
     disconnected: 'status.offline',
     connecting: 'status.connecting'
-  }
+  };
 
   return (
     <div>
@@ -140,6 +141,9 @@ const DashboardPage: React.FC = () => {
                     {t('server.tools')}
                   </th>
                   <th scope="col" className="px-6 py-5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    {t('server.prompts')}
+                  </th>
+                  <th scope="col" className="px-6 py-5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     {t('server.enabled')}
                   </th>
                 </tr>
@@ -162,6 +166,9 @@ const DashboardPage: React.FC = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {server.tools?.length || 0}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {server.prompts?.length || 0}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {server.enabled !== false ? (

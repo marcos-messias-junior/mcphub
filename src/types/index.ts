@@ -81,6 +81,49 @@ export interface MarketServer {
   is_official?: boolean;
 }
 
+// Cloud Market Server types (for MCPRouter API)
+export interface CloudServer {
+  created_at: string;
+  updated_at: string;
+  name: string;
+  author_name: string;
+  title: string;
+  description: string;
+  content: string;
+  server_key: string;
+  config_name: string;
+  tools?: CloudTool[];
+}
+
+export interface CloudTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, any>;
+}
+
+// MCPRouter API Response types
+export interface MCPRouterResponse<T = any> {
+  code: number;
+  message: string;
+  data: T;
+}
+
+export interface MCPRouterListServersResponse {
+  servers: CloudServer[];
+}
+
+export interface MCPRouterListToolsResponse {
+  tools: CloudTool[];
+}
+
+export interface MCPRouterCallToolResponse {
+  content: Array<{
+    type: string;
+    text: string;
+  }>;
+  isError: boolean;
+}
+
 export interface SystemConfig {
   routing?: {
     enableGlobalRoute?: boolean; // Controls whether the /sse endpoint without group is enabled
@@ -95,6 +138,12 @@ export interface SystemConfig {
     baseUrl?: string; // Base URL for group card copy operations
   };
   smartRouting?: SmartRoutingConfig;
+  mcpRouter?: {
+    apiKey?: string; // MCPRouter API key for authentication
+    referer?: string; // Referer header for MCPRouter API requests
+    title?: string; // Title header for MCPRouter API requests
+    baseUrl?: string; // Base URL for MCPRouter API (default: https://api.mcprouter.to/v1)
+  };
 }
 
 export interface UserConfig {
@@ -129,6 +178,7 @@ export interface ServerConfig {
   owner?: string; // Owner of the server, defaults to 'admin' user
   keepAliveInterval?: number; // Keep-alive ping interval in milliseconds (default: 60000ms for SSE servers)
   tools?: Record<string, { enabled: boolean; description?: string }>; // Tool-specific configurations with enable/disable state and custom descriptions
+  prompts?: Record<string, { enabled: boolean; description?: string }>; // Prompt-specific configurations with enable/disable state and custom descriptions
   options?: Partial<Pick<RequestOptions, 'timeout' | 'resetTimeoutOnProgress' | 'maxTotalTimeout'>>; // MCP request options configuration
   // OpenAPI specific configuration
   openapi?: {
@@ -177,7 +227,8 @@ export interface ServerInfo {
   owner?: string; // Owner of the server, defaults to 'admin' user
   status: 'connected' | 'connecting' | 'disconnected'; // Current connection status
   error: string | null; // Error message if any
-  tools: ToolInfo[]; // List of tools available on the server
+  tools: Tool[]; // List of tools available on the server
+  prompts: Prompt[]; // List of prompts available on the server
   client?: Client; // Client instance for communication (MCP clients)
   transport?: SSEClientTransport | StdioClientTransport | StreamableHTTPClientTransport; // Transport mechanism used
   openApiClient?: any; // OpenAPI client instance for openapi type servers
@@ -188,11 +239,25 @@ export interface ServerInfo {
 }
 
 // Details about a tool available on the server
-export interface ToolInfo {
+export interface Tool {
   name: string; // Name of the tool
   description: string; // Brief description of the tool
   inputSchema: Record<string, unknown>; // Input schema for the tool
   enabled?: boolean; // Whether the tool is enabled (optional, defaults to true)
+}
+
+export interface Prompt {
+  name: string; // Name of the prompt
+  title?: string; // Title of the prompt
+  description?: string; // Brief description of the prompt
+  arguments?: PromptArgument[]; // Input schema for the prompt
+}
+
+export interface PromptArgument {
+  name: string; // Name of the argument
+  title?: string; // Title of the argument
+  description?: string; // Brief description of the argument
+  required?: boolean; // Whether the argument is required
 }
 
 // Standardized API response structure

@@ -1,6 +1,6 @@
 import { getRepositoryFactory } from '../db/index.js';
 import { VectorEmbeddingRepository } from '../db/repositories/index.js';
-import { ToolInfo } from '../types/index.js';
+import { Tool } from '../types/index.js';
 import { getAppDataSource, initializeDatabase } from '../db/connection.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import OpenAI from 'openai';
@@ -190,7 +190,7 @@ function generateFallbackEmbedding(text: string): number[] {
  */
 export const saveToolsAsVectorEmbeddings = async (
   serverName: string,
-  tools: ToolInfo[],
+  tools: Tool[],
 ): Promise<void> => {
   try {
     if (tools.length === 0) {
@@ -499,7 +499,7 @@ export const syncAllServerToolsEmbeddings = async (): Promise<void> => {
     // Import getServersInfo to get all server information
     const { getServersInfo } = await import('./mcpService.js');
 
-    const servers = getServersInfo();
+    const servers = await getServersInfo();
     let totalToolsSynced = 0;
     let serversSynced = 0;
 

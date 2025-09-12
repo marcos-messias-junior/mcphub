@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiResponse } from '@/types';
 import { useToast } from '@/contexts/ToastContext';
-import { getApiUrl } from '../utils/runtime';
+import { apiGet, apiPut } from '../utils/fetchInterceptor';
 
 // Define types for the settings data
 interface RoutingConfig {
@@ -27,11 +27,19 @@ interface SmartRoutingConfig {
   openaiApiEmbeddingModel: string;
 }
 
+interface MCPRouterConfig {
+  apiKey: string;
+  referer: string;
+  title: string;
+  baseUrl: string;
+}
+
 interface SystemSettings {
   systemConfig?: {
     routing?: RoutingConfig;
     install?: InstallConfig;
     smartRouting?: SmartRoutingConfig;
+    mcpRouter?: MCPRouterConfig;
   };
 }
 
@@ -69,6 +77,13 @@ export const useSettingsData = () => {
     openaiApiEmbeddingModel: '',
   });
 
+  const [mcpRouterConfig, setMCPRouterConfig] = useState<MCPRouterConfig>({
+    apiKey: '',
+    referer: 'https://www.mcphubx.com',
+    title: 'MCPHub',
+    baseUrl: 'https://api.mcprouter.to/v1',
+  });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -84,18 +99,7 @@ export const useSettingsData = () => {
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/settings'), {
-        headers: {
-          'x-auth-token': token || '',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-
-      const data: ApiResponse<SystemSettings> = await response.json();
+      const data: ApiResponse<SystemSettings> = await apiGet('/settings');
 
       if (data.success && data.data?.systemConfig?.routing) {
         setRoutingConfig({
@@ -123,6 +127,14 @@ export const useSettingsData = () => {
             data.data.systemConfig.smartRouting.openaiApiEmbeddingModel || '',
         });
       }
+      if (data.success && data.data?.systemConfig?.mcpRouter) {
+        setMCPRouterConfig({
+          apiKey: data.data.systemConfig.mcpRouter.apiKey || '',
+          referer: data.data.systemConfig.mcpRouter.referer || 'https://www.mcphubx.com',
+          title: data.data.systemConfig.mcpRouter.title || 'MCPHub',
+          baseUrl: data.data.systemConfig.mcpRouter.baseUrl || 'https://api.mcprouter.to/v1',
+        });
+      }
     } catch (error) {
       console.error('Failed to fetch settings:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch settings');
@@ -134,33 +146,16 @@ export const useSettingsData = () => {
   }, [t]); // 移除 showToast 依赖
 
   // Update routing configuration
-  const updateRoutingConfig = async <T extends keyof RoutingConfig>(
-    key: T,
-    value: RoutingConfig[T],
-  ) => {
+  const updateRoutingConfig = async (key: keyof RoutingConfig, value: any) => {
     setLoading(true);
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/system-config'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': token || '',
+      const data = await apiPut('/system-config', {
+        routing: {
+          [key]: value,
         },
-        body: JSON.stringify({
-          routing: {
-            [key]: value,
-          },
-        }),
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
 
       if (data.success) {
         setRoutingConfig({
@@ -170,7 +165,7 @@ export const useSettingsData = () => {
         showToast(t('settings.systemConfigUpdated'));
         return true;
       } else {
-        showToast(t('errors.failedToUpdateRouteConfig'));
+        showToast(data.message || t('errors.failedToUpdateRouteConfig'));
         return false;
       }
     } catch (error) {
@@ -189,25 +184,11 @@ export const useSettingsData = () => {
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/system-config'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': token || '',
+      const data = await apiPut('/system-config', {
+        install: {
+          [key]: value,
         },
-        body: JSON.stringify({
-          install: {
-            [key]: value,
-          },
-        }),
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
 
       if (data.success) {
         setInstallConfig({
@@ -217,7 +198,7 @@ export const useSettingsData = () => {
         showToast(t('settings.systemConfigUpdated'));
         return true;
       } else {
-        showToast(t('errors.failedToUpdateSystemConfig'));
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
         return false;
       }
     } catch (error) {
@@ -239,26 +220,11 @@ export const useSettingsData = () => {
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/system-config'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': token || '',
+      const data = await apiPut('/system-config', {
+        smartRouting: {
+          [key]: value,
         },
-        body: JSON.stringify({
-          smartRouting: {
-            [key]: value,
-          },
-        }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
 
       if (data.success) {
         setSmartRoutingConfig({
@@ -289,24 +255,9 @@ export const useSettingsData = () => {
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/system-config'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': token || '',
-        },
-        body: JSON.stringify({
-          smartRouting: updates,
-        }),
+      const data = await apiPut('/system-config', {
+        smartRouting: updates,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
 
       if (data.success) {
         setSmartRoutingConfig({
@@ -337,23 +288,9 @@ export const useSettingsData = () => {
     setError(null);
 
     try {
-      const token = localStorage.getItem('mcphub_token');
-      const response = await fetch(getApiUrl('/system-config'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-auth-token': token || '',
-        },
-        body: JSON.stringify({
-          routing: updates,
-        }),
+      const data = await apiPut('/system-config', {
+        routing: updates,
       });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-
-      const data = await response.json();
 
       if (data.success) {
         setRoutingConfig({
@@ -363,13 +300,84 @@ export const useSettingsData = () => {
         showToast(t('settings.systemConfigUpdated'));
         return true;
       } else {
-        showToast(t('errors.failedToUpdateRouteConfig'));
+        showToast(data.message || t('errors.failedToUpdateRouteConfig'));
         return false;
       }
     } catch (error) {
       console.error('Failed to update routing config:', error);
       setError(error instanceof Error ? error.message : 'Failed to update routing config');
       showToast(t('errors.failedToUpdateRouteConfig'));
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update MCPRouter configuration
+  const updateMCPRouterConfig = async <T extends keyof MCPRouterConfig>(
+    key: T,
+    value: MCPRouterConfig[T],
+  ) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiPut('/system-config', {
+        mcpRouter: {
+          [key]: value,
+        },
+      });
+
+      if (data.success) {
+        setMCPRouterConfig({
+          ...mcpRouterConfig,
+          [key]: value,
+        });
+        showToast(t('settings.systemConfigUpdated'));
+        return true;
+      } else {
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to update MCPRouter config:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to update MCPRouter config';
+      setError(errorMessage);
+      showToast(errorMessage);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update multiple MCPRouter configuration fields at once
+  const updateMCPRouterConfigBatch = async (updates: Partial<MCPRouterConfig>) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const data = await apiPut('/system-config', {
+        mcpRouter: updates,
+      });
+
+      if (data.success) {
+        setMCPRouterConfig({
+          ...mcpRouterConfig,
+          ...updates,
+        });
+        showToast(t('settings.systemConfigUpdated'));
+        return true;
+      } else {
+        showToast(data.message || t('errors.failedToUpdateSystemConfig'));
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to update MCPRouter config:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Failed to update MCPRouter config';
+      setError(errorMessage);
+      showToast(errorMessage);
       return false;
     } finally {
       setLoading(false);
@@ -395,6 +403,7 @@ export const useSettingsData = () => {
     setTempRoutingConfig,
     installConfig,
     smartRoutingConfig,
+    mcpRouterConfig,
     loading,
     error,
     setError,
@@ -405,5 +414,7 @@ export const useSettingsData = () => {
     updateSmartRoutingConfig,
     updateSmartRoutingConfigBatch,
     updateRoutingConfigBatch,
+    updateMCPRouterConfig,
+    updateMCPRouterConfigBatch,
   };
 };

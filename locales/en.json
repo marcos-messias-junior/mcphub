@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "MCP Hub Dashboard",
+    "title": "MCPHub Dashboard",
     "error": "Error",
     "closeButton": "Close",
     "noServers": "No MCP servers available",
@@ -10,11 +10,11 @@
     "changePassword": "Change Password",
     "toggleSidebar": "Toggle Sidebar",
     "welcomeUser": "Welcome, {{username}}",
-    "name": "MCP Hub"
+    "name": "MCPHub"
   },
   "about": {
     "title": "About",
-    "versionInfo": "MCP Hub Version: {{version}}",
+    "versionInfo": "MCPHub Version: {{version}}",
     "newVersion": "New version available!",
     "currentVersion": "Current version",
     "newVersionAvailable": "New version {{version}} is available",
@@ -30,7 +30,7 @@
     "label": "Sponsor",
     "title": "Support the Project",
     "rewardAlt": "Reward QR Code",
-    "supportMessage": "Support the development of MCP Hub by buying me a coffee!",
+    "supportMessage": "Support the development of MCPHub by buying me a coffee!",
     "supportButton": "Support on Ko-fi"
   },
   "wechat": {
@@ -52,7 +52,9 @@
   },
   "auth": {
     "login": "Login",
-    "loginTitle": "Login to MCP Hub",
+    "loginTitle": "Login to MCPHub",
+    "slogan": "The Unified Hub for MCP Servers",
+    "subtitle": "Centralized management platform for Model Context Protocol servers. Organize, monitor, and scale multiple MCP servers with flexible routing strategies.",
     "username": "Username",
     "password": "Password",
     "loggingIn": "Logging in...",
@@ -78,6 +80,7 @@
     "deleteWarning": "Deleting server '{{name}}' will remove it and all its data. This action cannot be undone.",
     "status": "Status",
     "tools": "Tools",
+    "prompts": "Prompts",
     "name": "Server Name",
     "url": "Server URL",
     "apiKey": "API Key",
@@ -90,6 +93,10 @@
     "updateError": "Failed to update server",
     "editTitle": "Edit Server: {{serverName}}",
     "type": "Server Type",
+    "typeStdio": "STDIO",
+    "typeSse": "SSE",
+    "typeStreamableHttp": "Streamable HTTP",
+    "typeOpenapi": "OpenAPI",
     "command": "Command",
     "arguments": "Arguments",
     "envVars": "Environment Variables",
@@ -142,11 +149,17 @@
       "httpAuthConfig": "HTTP Authentication Configuration",
       "httpScheme": "Authentication Scheme",
       "httpCredentials": "Credentials",
+      "httpSchemeBasic": "Basic",
+      "httpSchemeBearer": "Bearer",
+      "httpSchemeDigest": "Digest",
       "oauth2Config": "OAuth 2.0 Configuration",
       "oauth2Token": "Access Token",
       "openIdConnectConfig": "OpenID Connect Configuration",
       "openIdConnectUrl": "Discovery URL",
-      "openIdConnectToken": "ID Token"
+      "openIdConnectToken": "ID Token",
+      "apiKeyInHeader": "Header",
+      "apiKeyInQuery": "Query",
+      "apiKeyInCookie": "Cookie"
     }
   },
   "status": {
@@ -187,7 +200,13 @@
     "copyFailed": "Copy failed",
     "close": "Close",
     "confirm": "Confirm",
-    "language": "Language"
+    "language": "Language",
+    "true": "True",
+    "false": "False",
+    "dismiss": "Dismiss",
+    "github": "GitHub",
+    "wechat": "WeChat",
+    "discord": "Discord"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -197,6 +216,7 @@
     "settings": "Settings",
     "changePassword": "Change Password",
     "market": "Market",
+    "cloud": "Cloud Market",
     "logs": "Logs"
   },
   "pages": {
@@ -228,7 +248,7 @@
       "smartRouting": "Smart Routing"
     },
     "market": {
-      "title": "Server Market - (Data from mcpm.sh)"
+      "title": "Market Hub - Local and Cloud Markets"
     },
     "logs": {
       "title": "System Logs"
@@ -281,7 +301,7 @@
     "configureTools": "Configure Tools"
   },
   "market": {
-    "title": "Server Market",
+    "title": "Local Installation",
     "official": "Official",
     "by": "By",
     "unknown": "Unknown",
@@ -324,6 +344,58 @@
     "confirmVariablesMessage": "Please ensure these variables are properly defined in your runtime environment. Continue installing server?",
     "confirmAndInstall": "Confirm and Install"
   },
+  "cloud": {
+    "title": "Cloud Support",
+    "subtitle": "Powered by MCPRouter",
+    "by": "By",
+    "server": "Server",
+    "config": "Config",
+    "created": "Created",
+    "updated": "Updated",
+    "available": "Available",
+    "description": "Description",
+    "details": "Details",
+    "tools": "Tools",
+    "tool": "tool",
+    "toolsAvailable": "{{count}} tool available||{{count}} tools available",
+    "loadingTools": "Loading tools...",
+    "noTools": "No tools available for this server",
+    "noDescription": "No description available",
+    "viewDetails": "View Details",
+    "parameters": "Parameters",
+    "result": "Result",
+    "error": "Error",
+    "callTool": "Call",
+    "calling": "Calling...",
+    "toolCallSuccess": "Tool {{toolName}} executed successfully",
+    "toolCallError": "Failed to call tool {{toolName}}: {{error}}",
+    "viewSchema": "View Schema",
+    "backToList": "Back to Cloud Market",
+    "search": "Search",
+    "searchPlaceholder": "Search cloud servers by name, title, or author",
+    "clearFilters": "Clear Filters",
+    "clearCategoryFilter": "Clear",
+    "clearTagFilter": "Clear",
+    "categories": "Categories",
+    "tags": "Tags",
+    "noCategories": "No categories found",
+    "noTags": "No tags found",
+    "noServers": "No cloud servers found",
+    "fetchError": "Error fetching cloud servers",
+    "serverNotFound": "Cloud server not found",
+    "searchError": "Error searching cloud servers",
+    "filterError": "Error filtering cloud servers by category",
+    "tagFilterError": "Error filtering cloud servers by tag",
+    "showing": "Showing {{from}}-{{to}} of {{total}} cloud servers",
+    "perPage": "Per page",
+    "apiKeyNotConfigured": "MCPRouter API key not configured",
+    "apiKeyNotConfiguredDescription": "To use cloud servers, you need to configure your MCPRouter API key.",
+    "getApiKey": "Get API Key",
+    "configureInSettings": "Configure in Settings",
+    "installServer": "Install {{name}}",
+    "installSuccess": "Server {{name}} installed successfully",
+    "installError": "Failed to install server: {{error}}"
+  },
   "tool": {
     "run": "Run",
     "running": "Running...",
@@ -358,6 +430,23 @@
     "item": "Item {{index}}",
     "addItem": "Add {{key}} item",
     "enterKey": "Enter {{key}}"
+  },
+  "prompt": {
+    "run": "Get",
+    "running": "Getting...",
+    "result": "Prompt Result",
+    "error": "Prompt Error",
+    "execution": "Prompt Execution",
+    "successful": "Successful",
+    "failed": "Failed",
+    "errorDetails": "Error Details:",
+    "noContent": "Prompt executed successfully but returned no content.",
+    "unknownError": "Unknown error occurred",
+    "jsonResponse": "JSON Response:",
+    "description": "Description",
+    "messages": "Messages",
+    "noDescription": "No description available",
+    "runPromptWithName": "Get Prompt: {{name}}"
   },
   "settings": {
     "enableGlobalRoute": "Enable Global Route",
@@ -394,7 +483,20 @@
     "openaiApiEmbeddingModelPlaceholder": "text-embedding-3-small",
     "smartRoutingConfigUpdated": "Smart routing configuration updated successfully",
     "smartRoutingRequiredFields": "Database URL and OpenAI API Key are required to enable smart routing",
-    "smartRoutingValidationError": "Please fill in the required fields before enabling Smart Routing: {{fields}}"
+    "smartRoutingValidationError": "Please fill in the required fields before enabling Smart Routing: {{fields}}",
+    "mcpRouterConfig": "Cloud Market",
+    "mcpRouterApiKey": "MCPRouter API Key",
+    "mcpRouterApiKeyDescription": "API key for accessing MCPRouter cloud market services",
+    "mcpRouterApiKeyPlaceholder": "Enter MCPRouter API key",
+    "mcpRouterReferer": "Referer",
+    "mcpRouterRefererDescription": "Referer header for MCPRouter API requests",
+    "mcpRouterRefererPlaceholder": "https://www.mcphubx.com",
+    "mcpRouterTitle": "Title",
+    "mcpRouterTitleDescription": "Title header for MCPRouter API requests",
+    "mcpRouterTitlePlaceholder": "MCPHub",
+    "mcpRouterBaseUrl": "Base URL",
+    "mcpRouterBaseUrlDescription": "Base URL for MCPRouter API",
+    "mcpRouterBaseUrlPlaceholder": "https://api.mcprouter.to/v1"
   },
   "dxt": {
     "upload": "Upload",
@@ -456,5 +558,64 @@
     "deleteConfirmation": "Are you sure you want to delete user '{{username}}'? This action cannot be undone.",
     "confirmDelete": "Delete User",
     "deleteWarning": "Are you sure you want to delete user '{{username}}'? This action cannot be undone."
+  },
+  "api": {
+    "errors": {
+      "readonly": "Readonly for demo environment",
+      "invalid_credentials": "Invalid username or password",
+      "serverNameRequired": "Server name is required",
+      "serverConfigRequired": "Server configuration is required",
+      "serverConfigInvalid": "Server configuration must include either a URL, OpenAPI specification URL or schema, or command with arguments",
+      "serverTypeInvalid": "Server type must be one of: stdio, sse, streamable-http, openapi",
+      "urlRequiredForType": "URL is required for {{type}} server type",
+      "openapiSpecRequired": "OpenAPI specification URL or schema is required for openapi server type",
+      "headersInvalidFormat": "Headers must be an object",
+      "headersNotSupportedForStdio": "Headers are not supported for stdio server type",
+      "serverNotFound": "Server not found",
+      "failedToRemoveServer": "Server not found or failed to remove",
+      "internalServerError": "Internal server error",
+      "failedToGetServers": "Failed to get servers information",
+      "failedToGetServerSettings": "Failed to get server settings",
+      "failedToGetServerConfig": "Failed to get server configuration",
+      "failedToSaveSettings": "Failed to save settings",
+      "toolNameRequired": "Server name and tool name are required",
+      "descriptionMustBeString": "Description must be a string",
+      "groupIdRequired": "Group ID is required",
+      "groupNameRequired": "Group name is required",
+      "groupNotFound": "Group not found",
+      "groupIdAndServerNameRequired": "Group ID and server name are required",
+      "groupOrServerNotFound": "Group or server not found",
+      "toolsMustBeAllOrArray": "Tools must be \"all\" or an array of strings",
+      "serverNameAndToolNameRequired": "Server name and tool name are required",
+      "usernameRequired": "Username is required",
+      "userNotFound": "User not found",
+      "failedToGetUsers": "Failed to get users information",
+      "failedToGetUserInfo": "Failed to get user information",
+      "failedToGetUserStats": "Failed to get user statistics",
+      "marketServerNameRequired": "Server name is required",
+      "marketServerNotFound": "Market server not found",
+      "failedToGetMarketServers": "Failed to get market servers information",
+      "failedToGetMarketServer": "Failed to get market server information",
+      "failedToGetMarketCategories": "Failed to get market categories",
+      "failedToGetMarketTags": "Failed to get market tags",
+      "failedToSearchMarketServers": "Failed to search market servers",
+      "failedToFilterMarketServers": "Failed to filter market servers",
+      "failedToProcessDxtFile": "Failed to process DXT file"
+    },
+    "success": {
+      "serverCreated": "Server created successfully",
+      "serverUpdated": "Server updated successfully",
+      "serverRemoved": "Server removed successfully",
+      "serverToggled": "Server status toggled successfully",
+      "toolToggled": "Tool {{name}} {{action}} successfully",
+      "toolDescriptionUpdated": "Tool {{name}} description updated successfully",
+      "systemConfigUpdated": "System configuration updated successfully",
+      "groupCreated": "Group created successfully",
+      "groupUpdated": "Group updated successfully",
+      "groupDeleted": "Group deleted successfully",
+      "serverAddedToGroup": "Server added to group successfully",
+      "serverRemovedFromGroup": "Server removed from group successfully",
+      "serverToolsUpdated": "Server tools updated successfully"
+    }
   }
 }

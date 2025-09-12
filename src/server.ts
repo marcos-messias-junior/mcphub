@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import config from './config/index.js';
 import path from 'path';
 import fs from 'fs';
@@ -7,6 +8,7 @@ import { swaggerSpec } from './config/swagger.js';
 import { initUpstreamServers, connected } from './services/mcpService.js';
 import { initMiddlewares } from './middlewares/index.js';
 import { initRoutes } from './routes/index.js';
+import { initI18n } from './utils/i18n.js';
 import {
   handleSseConnection,
   handleSseMessage,
@@ -27,12 +29,17 @@ export class AppServer {
 
   constructor() {
     this.app = express();
+    this.app.use(cors());
     this.port = config.port;
     this.basePath = config.basePath;
   }
 
   async initialize(): Promise<void> {
     try {
+      // Initialize i18n before other components
+      await initI18n();
+      console.log('i18n initialized successfully');
+
       // Initialize default admin user if no users exist
       await initializeDefaultUser();
 

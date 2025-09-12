@@ -10,6 +10,8 @@ import {
   toggleServer,
   toggleTool,
   updateToolDescription,
+  togglePrompt,
+  updatePromptDescription,
   updateSystemConfig,
 } from '../controllers/serverController.js';
 import {
@@ -43,16 +45,39 @@ import {
   getMarketServersByCategory,
   getMarketServersByTag,
 } from '../controllers/marketController.js';
+import {
+  getAllCloudServers,
+  getCloudServer,
+  getAllCloudCategories,
+  getAllCloudTags,
+  searchCloudServersByQuery,
+  getCloudServersByCategory,
+  getCloudServersByTag,
+  getCloudServerToolsList,
+  callCloudTool,
+} from '../controllers/cloudController.js';
 import { login, register, getCurrentUser, changePassword } from '../controllers/authController.js';
 import { getAllLogs, clearLogs, streamLogs } from '../controllers/logController.js';
 import { getRuntimeConfig, getPublicConfig } from '../controllers/configController.js';
 import { callTool } from '../controllers/toolController.js';
+import { getPrompt } from '../controllers/promptController.js';
 import { uploadDxtFile, uploadMiddleware } from '../controllers/dxtController.js';
+import { healthCheck } from '../controllers/healthController.js';
+import {
+  getOpenAPISpec,
+  getOpenAPIServers,
+  getOpenAPIStats,
+  executeToolViaOpenAPI,
+  getGroupOpenAPISpec,
+} from '../controllers/openApiController.js';
 import { auth } from '../middlewares/auth.js';
 
 const router = express.Router();
 
 export const initRoutes = (app: express.Application): void => {
+  // Health check endpoint (no auth required, accessible at /health)
+  app.get('/health', healthCheck);
+
   // API routes protected by auth middleware in middlewares/index.ts
   router.get('/servers', getAllServers);
   router.get('/settings', getAllSettings);
@@ -62,6 +87,8 @@ export const initRoutes = (app: express.Application): void => {
   router.post('/servers/:name/toggle', toggleServer);
   router.post('/servers/:serverName/tools/:toolName/toggle', toggleTool);
   router.put('/servers/:serverName/tools/:toolName/description', updateToolDescription);
+  router.post('/servers/:serverName/prompts/:promptName/toggle', togglePrompt);
+  router.put('/servers/:serverName/prompts/:promptName/description', updatePromptDescription);
   router.put('/system-config', updateSystemConfig);
 
   // Group management routes
@@ -91,6 +118,9 @@ export const initRoutes = (app: express.Application): void => {
   // Tool management routes
   router.post('/tools/call/:server', callTool);
 
+  // Prompt management routes
+  router.post('/mcp/:serverName/prompts/:promptName', getPrompt);
+
   // DXT upload routes
   router.post('/dxt/upload', uploadMiddleware, uploadDxtFile);
 
@@ -102,6 +132,17 @@ export const initRoutes = (app: express.Application): void => {
   router.get('/market/categories/:category', getMarketServersByCategory);
   router.get('/market/tags', getAllMarketTags);
   router.get('/market/tags/:tag', getMarketServersByTag);
+
+  // Cloud Market routes
+  router.get('/cloud/servers', getAllCloudServers);
+  router.get('/cloud/servers/search', searchCloudServersByQuery);
+  router.get('/cloud/servers/:name', getCloudServer);
+  router.get('/cloud/categories', getAllCloudCategories);
+  router.get('/cloud/categories/:category', getCloudServersByCategory);
+  router.get('/cloud/tags', getAllCloudTags);
+  router.get('/cloud/tags/:tag', getCloudServersByTag);
+  router.get('/cloud/servers/:serverName/tools', getCloudServerToolsList);
+  router.post('/cloud/servers/:serverName/tools/:toolName/call', callCloudTool);
 
   // Log routes
   router.get('/logs', getAllLogs);
@@ -145,6 +186,18 @@ export const initRoutes = (app: express.Application): void => {
 
   // Public configuration endpoint (no auth required to check skipAuth setting)
   app.get(`${config.basePath}/public-config`, getPublicConfig);
+
+  // OpenAPI generation endpoints
+  app.get(`${config.basePath}/api/openapi.json`, getOpenAPISpec);
+  app.get(`${config.basePath}/api/:name/openapi.json`, getGroupOpenAPISpec);
+  app.get(`${config.basePath}/api/openapi/servers`, getOpenAPIServers);
+  app.get(`${config.basePath}/api/openapi/stats`, getOpenAPIStats);
+
+  // OpenAPI-compatible tool execution endpoints
+  app.get(`${config.basePath}/api/tools/:serverName/:toolName`, executeToolViaOpenAPI);
+  app.post(`${config.basePath}/api/tools/:serverName/:toolName`, executeToolViaOpenAPI);
+  app.get(`${config.basePath}/api/:name/tools/:serverName/:toolName`, executeToolViaOpenAPI);
+  app.post(`${config.basePath}/api/:name/tools/:serverName/:toolName`, executeToolViaOpenAPI);
 
   app.use(`${config.basePath}/api`, router);
 };

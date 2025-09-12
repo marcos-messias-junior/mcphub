@@ -13,9 +13,9 @@ import { loadSettings, saveSettings } from '../config/index.js';
 import { syncAllServerToolsEmbeddings } from '../services/vectorSearchService.js';
 import { createSafeJSON } from '../utils/serialization.js';
 
-export const getAllServers = (_: Request, res: Response): void => {
+export const getAllServers = async (_: Request, res: Response): Promise<void> => {
   try {
-    const serversInfo = getServersInfo();
+    const serversInfo = await getServersInfo();
     const response: ApiResponse = {
       success: true,
       data: createSafeJSON(serversInfo),
@@ -167,7 +167,7 @@ export const deleteServer = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    const result = removeServer(name);
+    const result = await removeServer(name);
     if (result.success) {
       notifyToolChanged();
       res.json({
@@ -280,7 +280,7 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
 
     const result = await addOrUpdateServer(name, config, true); // Allow override for updates
     if (result.success) {
-      notifyToolChanged();
+      notifyToolChanged(name);
       res.json({
         success: true,
         message: 'Server updated successfully',
@@ -299,11 +299,12 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-export const getServerConfig = (req: Request, res: Response): void => {
+export const getServerConfig = async (req: Request, res: Response): Promise<void> => {
   try {
     const { name } = req.params;
-    const settings = loadSettings();
-    if (!settings.mcpServers || !settings.mcpServers[name]) {
+    const allServers = await getServersInfo();
+    const serverInfo = allServers.find((s) => s.name === name);
+    if (!serverInfo) {
       res.status(404).json({
         success: false,
         message: 'Server not found',
@@ -311,15 +312,13 @@ export const getServerConfig = (req: Request, res: Response): void => {
       return;
     }
 
-    const serverInfo = getServersInfo().find((s) => s.name === name);
-    const serverConfig = settings.mcpServers[name];
     const response: ApiResponse = {
       success: true,
       data: {
         name,
         status: serverInfo ? serverInfo.status : 'disconnected',
         tools: serverInfo ? serverInfo.tools : [],
-        config: serverConfig,
+        config: serverInfo,
       },
     };
 
@@ -505,7 +504,8 @@ export const updateToolDescription = async (req: Request, res: Response): Promis
 
 export const updateSystemConfig = (req: Request, res: Response): void => {
   try {
-    const { routing, install, smartRouting } = req.body;
+    const { routing, install, smartRouting, mcpRouter } = req.body;
+    const currentUser = (req as any).user;
 
     if (
       (!routing ||
@@ -523,7 +523,12 @@ export const updateSystemConfig = (req: Request, res: Response): void => {
           typeof smartRouting.dbUrl !== 'string' &&
           typeof smartRouting.openaiApiBaseUrl !== 'string' &&
           typeof smartRouting.openaiApiKey !== 'string' &&
-          typeof smartRouting.openaiApiEmbeddingModel !== 'string'))
+          typeof smartRouting.openaiApiEmbeddingModel !== 'string')) &&
+      (!mcpRouter ||
+        (typeof mcpRouter.apiKey !== 'string' &&
+          typeof mcpRouter.referer !== 'string' &&
+          typeof mcpRouter.title !== 'string' &&
+          typeof mcpRouter.baseUrl !== 'string'))
     ) {
       res.status(400).json({
         success: false,
@@ -554,6 +559,12 @@ export const updateSystemConfig = (req: Request, res: Response): void => {
           openaiApiKey: '',
           openaiApiEmbeddingModel: '',
         },
+        mcpRouter: {
+          apiKey: '',
+          referer: 'https://www.mcphubx.com',
+          title: 'MCPHub',
+          baseUrl: 'https://api.mcprouter.to/v1',
+        },
       };
     }
 
@@ -582,6 +593,15 @@ export const updateSystemConfig = (req: Request, res: Response): void => {
         openaiApiBaseUrl: '',
         openaiApiKey: '',
         openaiApiEmbeddingModel: '',
+      };
+    }
+
+    if (!settings.systemConfig.mcpRouter) {
+      settings.systemConfig.mcpRouter = {
+        apiKey: '',
+        referer: 'https://www.mcphubx.com',
+        title: 'MCPHub',
+        baseUrl: 'https://api.mcprouter.to/v1',
       };
     }
 
@@ -675,7 +695,22 @@ export const updateSystemConfig = (req: Request, res: Response): void => {
       needsSync = (!wasSmartRoutingEnabled && isNowEnabled) || (isNowEnabled && hasConfigChanged);
     }
 
-    if (saveSettings(settings)) {
+    if (mcpRouter) {
+      if (typeof mcpRouter.apiKey === 'string') {
+        settings.systemConfig.mcpRouter.apiKey = mcpRouter.apiKey;
+      }
+      if (typeof mcpRouter.referer === 'string') {
+        settings.systemConfig.mcpRouter.referer = mcpRouter.referer;
+      }
+      if (typeof mcpRouter.title === 'string') {
+        settings.systemConfig.mcpRouter.title = mcpRouter.title;
+      }
+      if (typeof mcpRouter.baseUrl === 'string') {
+        settings.systemConfig.mcpRouter.baseUrl = mcpRouter.baseUrl;
+      }
+    }
+
+    if (saveSettings(settings, currentUser)) {
       res.json({
         success: true,
         data: settings.systemConfig,
@@ -696,6 +731,134 @@ export const updateSystemConfig = (req: Request, res: Response): void => {
         message: 'Failed to save system configuration',
       });
     }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Toggle prompt status for a specific server
+export const togglePrompt = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { serverName, promptName } = req.params;
+    const { enabled } = req.body;
+
+    if (!serverName || !promptName) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and prompt name are required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const settings = loadSettings();
+    if (!settings.mcpServers[serverName]) {
+      res.status(404).json({
+        success: false,
+        message: 'Server not found',
+      });
+      return;
+    }
+
+    // Initialize prompts config if it doesn't exist
+    if (!settings.mcpServers[serverName].prompts) {
+      settings.mcpServers[serverName].prompts = {};
+    }
+
+    // Set the prompt's enabled state
+    settings.mcpServers[serverName].prompts![promptName] = { enabled };
+
+    if (!saveSettings(settings)) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools have changed (as prompts are part of the tool listing)
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Prompt ${promptName} ${enabled ? 'enabled' : 'disabled'} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Update prompt description for a specific server
+export const updatePromptDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { serverName, promptName } = req.params;
+    const { description } = req.body;
+
+    if (!serverName || !promptName) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and prompt name are required',
+      });
+      return;
+    }
+
+    if (typeof description !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Description must be a string',
+      });
+      return;
+    }
+
+    const settings = loadSettings();
+    if (!settings.mcpServers[serverName]) {
+      res.status(404).json({
+        success: false,
+        message: 'Server not found',
+      });
+      return;
+    }
+
+    // Initialize prompts config if it doesn't exist
+    if (!settings.mcpServers[serverName].prompts) {
+      settings.mcpServers[serverName].prompts = {};
+    }
+
+    // Set the prompt's description
+    if (!settings.mcpServers[serverName].prompts![promptName]) {
+      settings.mcpServers[serverName].prompts![promptName] = { enabled: true };
+    }
+
+    settings.mcpServers[serverName].prompts![promptName].description = description;
+
+    if (!saveSettings(settings)) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools have changed (as prompts are part of the tool listing)
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Prompt ${promptName} description updated successfully`,
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
