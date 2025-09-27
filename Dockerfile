@@ -25,6 +25,7 @@ RUN if [ "$INSTALL_EXT" = "true" ]; then \
   fi
 
 RUN uv tool install mcp-server-fetch
+RUN pip install "mcp[cli]"
 
 WORKDIR /app
 
