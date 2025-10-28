@@ -36,6 +36,7 @@ RUN if [ "$INSTALL_EXT" = "true" ]; then \
 
 RUN uv tool install mcp-server-fetch
 RUN pip install "mcp[cli]"
+RUN pip install "websocket-client"
 
 WORKDIR /app
 
