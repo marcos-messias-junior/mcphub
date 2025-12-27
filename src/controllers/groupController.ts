@@ -1,5 +1,11 @@
 import { Request, Response } from 'express';
-import { ApiResponse } from '../types/index.js';
+import {
+  ApiResponse,
+  AddGroupRequest,
+  BatchCreateGroupsRequest,
+  BatchCreateGroupsResponse,
+  BatchGroupResult,
+} from '../types/index.js';
 import {
   getAllGroups,
   getGroupByIdOrName,
@@ -15,9 +21,9 @@ import {
 } from '../services/groupService.js';
 
 // Get all groups
-export const getGroups = (_: Request, res: Response): void => {
+export const getGroups = async (_: Request, res: Response): Promise<void> => {
   try {
-    const groups = getAllGroups();
+    const groups = await getAllGroups();
     const response: ApiResponse = {
       success: true,
       data: groups,
@@ -32,7 +38,7 @@ export const getGroups = (_: Request, res: Response): void => {
 };
 
 // Get a specific group by ID
-export const getGroup = (req: Request, res: Response): void => {
+export const getGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     if (!id) {
@@ -43,7 +49,7 @@ export const getGroup = (req: Request, res: Response): void => {
       return;
     }
 
-    const group = getGroupByIdOrName(id);
+    const group = await getGroupByIdOrName(id);
     if (!group) {
       res.status(404).json({
         success: false,
@@ -66,7 +72,7 @@ export const getGroup = (req: Request, res: Response): void => {
 };
 
 // Create a new group
-export const createNewGroup = (req: Request, res: Response): void => {
+export const createNewGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, description, servers } = req.body;
     if (!name) {
@@ -83,7 +89,7 @@ export const createNewGroup = (req: Request, res: Response): void => {
     const currentUser = (req as any).user;
     const owner = currentUser?.username || 'admin';
 
-    const newGroup = createGroup(name, description, serverList, owner);
+    const newGroup = await createGroup(name, description, serverList, owner);
     if (!newGroup) {
       res.status(400).json({
         success: false,
@@ -106,8 +112,145 @@ export const createNewGroup = (req: Request, res: Response): void => {
   }
 };
 
+// Batch create groups - validates and creates multiple groups in one request
+export const batchCreateGroups = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { groups } = req.body as BatchCreateGroupsRequest;
+
+    // Validate request body
+    if (!groups || !Array.isArray(groups)) {
+      res.status(400).json({
+        success: false,
+        message: 'Request body must contain a "groups" array',
+      });
+      return;
+    }
+
+    if (groups.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Groups array cannot be empty',
+      });
+      return;
+    }
+
+    // Helper function to validate a single group configuration
+    const validateGroupConfig = (group: AddGroupRequest): { valid: boolean; message?: string } => {
+      if (!group.name || typeof group.name !== 'string') {
+        return { valid: false, message: 'Group name is required and must be a string' };
+      }
+
+      if (group.description !== undefined && typeof group.description !== 'string') {
+        return { valid: false, message: 'Group description must be a string' };
+      }
+
+      if (group.servers !== undefined && !Array.isArray(group.servers)) {
+        return { valid: false, message: 'Group servers must be an array' };
+      }
+
+      // Validate server configurations if provided in new format
+      if (group.servers) {
+        for (const server of group.servers) {
+          if (typeof server === 'object' && server !== null) {
+            if (!server.name || typeof server.name !== 'string') {
+              return {
+                valid: false,
+                message: 'Server configuration must have a name property',
+              };
+            }
+
+            if (
+              server.tools !== undefined &&
+              server.tools !== 'all' &&
+              !Array.isArray(server.tools)
+            ) {
+              return {
+                valid: false,
+                message: 'Server tools must be "all" or an array of tool names',
+              };
+            }
+          }
+        }
+      }
+
+      return { valid: true };
+    };
+
+    // Process each group
+    const results: BatchGroupResult[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    // Get current user for owner field
+    const currentUser = (req as any).user;
+    const defaultOwner = currentUser?.username || 'admin';
+
+    for (const groupData of groups) {
+      const { name, description, servers } = groupData;
+
+      // Validate group configuration
+      const validation = validateGroupConfig(groupData);
+      if (!validation.valid) {
+        results.push({
+          name: name || 'unknown',
+          success: false,
+          message: validation.message,
+        });
+        failureCount++;
+        continue;
+      }
+
+      try {
+        const serverList = Array.isArray(servers) ? servers : [];
+        const newGroup = await createGroup(name, description, serverList, defaultOwner);
+
+        if (newGroup) {
+          results.push({
+            name,
+            success: true,
+            message: 'Group created successfully',
+          });
+          successCount++;
+        } else {
+          results.push({
+            name,
+            success: false,
+            message: 'Failed to create group or group name already exists',
+          });
+          failureCount++;
+        }
+      } catch (error) {
+        results.push({
+          name,
+          success: false,
+          message: error instanceof Error ? error.message : 'Failed to create group',
+        });
+        failureCount++;
+      }
+    }
+
+    // Return response
+    const response: BatchCreateGroupsResponse = {
+      success: successCount > 0,
+      successCount,
+      failureCount,
+      results,
+    };
+
+    // Use 207 Multi-Status if there were partial failures, 200 if all succeeded
+    const statusCode = failureCount > 0 && successCount > 0 ? 207 : successCount > 0 ? 200 : 400;
+    res.status(statusCode).json(response);
+  } catch (error) {
+    console.error('Batch create groups error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
 // Update an existing group
-export const updateExistingGroup = (req: Request, res: Response): void => {
+export const updateExistingGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { name, description, servers } = req.body;
@@ -133,7 +276,7 @@ export const updateExistingGroup = (req: Request, res: Response): void => {
       return;
     }
 
-    const updatedGroup = updateGroup(id, updateData);
+    const updatedGroup = await updateGroup(id, updateData);
     if (!updatedGroup) {
       res.status(404).json({
         success: false,
@@ -157,7 +300,7 @@ export const updateExistingGroup = (req: Request, res: Response): void => {
 };
 
 // Update servers in a group (batch update) - supports both string[] and server config format
-export const updateGroupServersBatch = (req: Request, res: Response): void => {
+export const updateGroupServersBatch = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { servers } = req.body;
@@ -203,7 +346,7 @@ export const updateGroupServersBatch = (req: Request, res: Response): void => {
       }
     }
 
-    const updatedGroup = updateGroupServers(id, servers);
+    const updatedGroup = await updateGroupServers(id, servers);
     if (!updatedGroup) {
       res.status(404).json({
         success: false,
@@ -227,7 +370,7 @@ export const updateGroupServersBatch = (req: Request, res: Response): void => {
 };
 
 // Delete a group
-export const deleteExistingGroup = (req: Request, res: Response): void => {
+export const deleteExistingGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     if (!id) {
@@ -238,7 +381,7 @@ export const deleteExistingGroup = (req: Request, res: Response): void => {
       return;
     }
 
-    const success = deleteGroup(id);
+    const success = await deleteGroup(id);
     if (!success) {
       res.status(404).json({
         success: false,
@@ -260,7 +403,7 @@ export const deleteExistingGroup = (req: Request, res: Response): void => {
 };
 
 // Add server to a group
-export const addServerToExistingGroup = (req: Request, res: Response): void => {
+export const addServerToExistingGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { serverName } = req.body;
@@ -280,7 +423,7 @@ export const addServerToExistingGroup = (req: Request, res: Response): void => {
       return;
     }
 
-    const updatedGroup = addServerToGroup(id, serverName);
+    const updatedGroup = await addServerToGroup(id, serverName);
     if (!updatedGroup) {
       res.status(404).json({
         success: false,
@@ -304,7 +447,7 @@ export const addServerToExistingGroup = (req: Request, res: Response): void => {
 };
 
 // Remove server from a group
-export const removeServerFromExistingGroup = (req: Request, res: Response): void => {
+export const removeServerFromExistingGroup = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id, serverName } = req.params;
     if (!id || !serverName) {
@@ -315,7 +458,7 @@ export const removeServerFromExistingGroup = (req: Request, res: Response): void
       return;
     }
 
-    const updatedGroup = removeServerFromGroup(id, serverName);
+    const updatedGroup = await removeServerFromGroup(id, serverName);
     if (!updatedGroup) {
       res.status(404).json({
         success: false,
@@ -339,7 +482,7 @@ export const removeServerFromExistingGroup = (req: Request, res: Response): void
 };
 
 // Get servers in a group
-export const getGroupServers = (req: Request, res: Response): void => {
+export const getGroupServers = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     if (!id) {
@@ -350,7 +493,7 @@ export const getGroupServers = (req: Request, res: Response): void => {
       return;
     }
 
-    const group = getGroupByIdOrName(id);
+    const group = await getGroupByIdOrName(id);
     if (!group) {
       res.status(404).json({
         success: false,
@@ -373,7 +516,7 @@ export const getGroupServers = (req: Request, res: Response): void => {
 };
 
 // Get server configurations in a group (including tool selections)
-export const getGroupServerConfigs = (req: Request, res: Response): void => {
+export const getGroupServerConfigs = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     if (!id) {
@@ -384,7 +527,7 @@ export const getGroupServerConfigs = (req: Request, res: Response): void => {
       return;
     }
 
-    const serverConfigs = getServerConfigsInGroup(id);
+    const serverConfigs = await getServerConfigsInGroup(id);
     const response: ApiResponse = {
       success: true,
       data: serverConfigs,
@@ -399,7 +542,7 @@ export const getGroupServerConfigs = (req: Request, res: Response): void => {
 };
 
 // Get specific server configuration in a group
-export const getGroupServerConfig = (req: Request, res: Response): void => {
+export const getGroupServerConfig = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id, serverName } = req.params;
     if (!id || !serverName) {
@@ -410,7 +553,7 @@ export const getGroupServerConfig = (req: Request, res: Response): void => {
       return;
     }
 
-    const serverConfig = getServerConfigInGroup(id, serverName);
+    const serverConfig = await getServerConfigInGroup(id, serverName);
     if (!serverConfig) {
       res.status(404).json({
         success: false,
@@ -433,7 +576,7 @@ export const getGroupServerConfig = (req: Request, res: Response): void => {
 };
 
 // Update tools for a specific server in a group
-export const updateGroupServerTools = (req: Request, res: Response): void => {
+export const updateGroupServerTools = async (req: Request, res: Response): Promise<void> => {
   try {
     const { id, serverName } = req.params;
     const { tools } = req.body;
@@ -458,7 +601,7 @@ export const updateGroupServerTools = (req: Request, res: Response): void => {
       return;
     }
 
-    const updatedGroup = updateServerToolsInGroup(id, serverName, tools);
+    const updatedGroup = await updateServerToolsInGroup(id, serverName, tools);
     if (!updatedGroup) {
       res.status(404).json({
         success: false,

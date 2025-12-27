@@ -20,6 +20,7 @@ import { sseUserContextMiddleware } from './middlewares/userContext.js';
 import { findPackageRoot } from './utils/path.js';
 import { getCurrentModuleDir } from './utils/moduleDir.js';
 import { initOAuthProvider, getOAuthRouter } from './services/oauthService.js';
+import { initOAuthServer } from './services/oauthServerService.js';
 
 /**
  * Get the directory of the current module
@@ -61,8 +62,8 @@ export class AppServer {
       // Initialize default admin user if no users exist
       await initializeDefaultUser();
 
-      // Initialize OAuth provider if configured
-      initOAuthProvider();
+      // Initialize OAuth provider if configured (for proxying upstream MCP OAuth)
+      await initOAuthProvider();
       const oauthRouter = getOAuthRouter();
       if (oauthRouter) {
         // Mount OAuth router at the root level (before other routes)
@@ -70,6 +71,9 @@ export class AppServer {
         this.app.use(oauthRouter);
         console.log('OAuth router mounted successfully');
       }
+
+      // Initialize OAuth authorization server (for MCPHub's own OAuth)
+      await initOAuthServer();
 
       initMiddlewares(this.app);
       
@@ -108,8 +112,10 @@ export class AppServer {
           );
 
           // User-scoped routes with user context middleware
-          this.app.get(`${this.basePath}/:user/sse/:group(.*)?`, sseUserContextMiddleware, (req, res) =>
-            handleSseConnection(req, res),
+          this.app.get(
+            `${this.basePath}/:user/sse/:group(.*)?`,
+            sseUserContextMiddleware,
+            (req, res) => handleSseConnection(req, res),
           );
           this.app.post(
             `${this.basePath}/:user/messages`,

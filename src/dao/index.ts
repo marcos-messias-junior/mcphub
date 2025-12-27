@@ -6,6 +6,20 @@ export * from './ServerDao.js';
 export * from './GroupDao.js';
 export * from './SystemConfigDao.js';
 export * from './UserConfigDao.js';
+export * from './OAuthClientDao.js';
+export * from './OAuthTokenDao.js';
+export * from './BearerKeyDao.js';
+
+// Export database implementations
+export * from './UserDaoDbImpl.js';
+export * from './ServerDaoDbImpl.js';
+export * from './GroupDaoDbImpl.js';
+export * from './SystemConfigDaoDbImpl.js';
+export * from './UserConfigDaoDbImpl.js';
+export * from './OAuthClientDaoDbImpl.js';
+export * from './OAuthTokenDaoDbImpl.js';
+export * from './BearerKeyDaoDbImpl.js';
 
 // Export the DAO factory and convenience functions
 export * from './DaoFactory.js';
+export * from './DatabaseDaoFactory.js';

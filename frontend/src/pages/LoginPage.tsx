@@ -1,10 +1,33 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { getToken } from '../services/authService';
 import ThemeSwitch from '@/components/ui/ThemeSwitch';
 import LanguageSwitch from '@/components/ui/LanguageSwitch';
 import DefaultPasswordWarningModal from '@/components/ui/DefaultPasswordWarningModal';
+
+const sanitizeReturnUrl = (value: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    // Support both relative paths and absolute URLs on the same origin
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(value, origin);
+    if (url.origin !== origin) {
+      return null;
+    }
+    const relativePath = `${url.pathname}${url.search}${url.hash}`;
+    return relativePath || '/';
+  } catch {
+    if (value.startsWith('/') && !value.startsWith('//')) {
+      return value;
+    }
+    return null;
+  }
+};
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
@@ -14,7 +37,64 @@ const LoginPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [showDefaultPasswordWarning, setShowDefaultPasswordWarning] = useState(false);
   const { login } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+  const returnUrl = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    return sanitizeReturnUrl(params.get('returnUrl'));
+  }, [location.search]);
+
+  const isServerUnavailableError = useCallback((message?: string) => {
+    if (!message) return false;
+    const normalized = message.toLowerCase();
+
+    return (
+      normalized.includes('failed to fetch') ||
+      normalized.includes('networkerror') ||
+      normalized.includes('network error') ||
+      normalized.includes('connection refused') ||
+      normalized.includes('unable to connect') ||
+      normalized.includes('fetch error') ||
+      normalized.includes('econnrefused') ||
+      normalized.includes('http 500') ||
+      normalized.includes('internal server error') ||
+      normalized.includes('proxy error')
+    );
+  }, []);
+
+  const buildRedirectTarget = useCallback(() => {
+    if (!returnUrl) {
+      return '/';
+    }
+
+    // Only attach JWT when returning to the OAuth authorize endpoint
+    if (!returnUrl.startsWith('/oauth/authorize')) {
+      return returnUrl;
+    }
+
+    const token = getToken();
+    if (!token) {
+      return returnUrl;
+    }
+
+    try {
+      const origin = window.location.origin;
+      const url = new URL(returnUrl, origin);
+      url.searchParams.set('token', token);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      const separator = returnUrl.includes('?') ? '&' : '?';
+      return `${returnUrl}${separator}token=${encodeURIComponent(token)}`;
+    }
+  }, [returnUrl]);
+
+  const redirectAfterLogin = useCallback(() => {
+    if (returnUrl) {
+      window.location.assign(buildRedirectTarget());
+    } else {
+      navigate('/');
+    }
+  }, [buildRedirectTarget, navigate, returnUrl]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,13 +115,23 @@ const LoginPage: React.FC = () => {
           // Show warning modal instead of navigating immediately
           setShowDefaultPasswordWarning(true);
         } else {
-          navigate('/');
+          redirectAfterLogin();
         }
       } else {
-        setError(t('auth.loginFailed'));
+        const message = result.message;
+        if (isServerUnavailableError(message)) {
+          setError(t('auth.serverUnavailable'));
+        } else {
+          setError(t('auth.loginFailed'));
+        }
       }
     } catch (err) {
-      setError(t('auth.loginError'));
+      const message = err instanceof Error ? err.message : undefined;
+      if (isServerUnavailableError(message)) {
+        setError(t('auth.serverUnavailable'));
+      } else {
+        setError(t('auth.loginError'));
+      }
     } finally {
       setLoading(false);
     }
@@ -49,7 +139,7 @@ const LoginPage: React.FC = () => {
 
   const handleCloseWarning = () => {
     setShowDefaultPasswordWarning(false);
-    navigate('/');
+    redirectAfterLogin();
   };
 
   return (
@@ -69,13 +159,21 @@ const LoginPage: React.FC = () => {
         }}
       />
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <svg className="h-full w-full opacity-[0.08] dark:opacity-[0.12]" xmlns="http://www.w3.org/2000/svg">
+        <svg
+          className="h-full w-full opacity-[0.08] dark:opacity-[0.12]"
+          xmlns="http://www.w3.org/2000/svg"
+        >
           <defs>
             <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
               <path d="M 32 0 L 0 0 0 32" fill="none" stroke="currentColor" strokeWidth="0.5" />
             </pattern>
           </defs>
-          <rect width="100%" height="100%" fill="url(#grid)" className="text-gray-400 dark:text-gray-300" />
+          <rect
+            width="100%"
+            height="100%"
+            fill="url(#grid)"
+            className="text-gray-400 dark:text-gray-300"
+          />
         </svg>
       </div>
 

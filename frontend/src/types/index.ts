@@ -114,6 +114,8 @@ export interface ServerConfig {
   env?: Record<string, string>;
   headers?: Record<string, string>;
   enabled?: boolean;
+  enableKeepAlive?: boolean; // Enable keep-alive for this server (requires global enable as well)
+  keepAliveInterval?: number; // Keep-alive ping interval in milliseconds (default: 60000ms)
   tools?: Record<string, { enabled: boolean; description?: string }>; // Tool-specific configurations with enable/disable state and custom descriptions
   prompts?: Record<string, { enabled: boolean; description?: string }>; // Prompt-specific configurations with enable/disable state and custom descriptions
   options?: {
@@ -250,6 +252,10 @@ export interface ServerFormData {
     resetTimeoutOnProgress?: boolean;
     maxTotalTimeout?: number;
   };
+  keepAlive?: {
+    enabled?: boolean;
+    interval?: number;
+  };
   oauth?: {
     clientId?: string;
     clientSecret?: string;
@@ -301,6 +307,19 @@ export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
   data?: T;
+}
+
+// Bearer authentication key configuration (frontend view model)
+export type BearerKeyAccessType = 'all' | 'groups' | 'servers' | 'custom';
+
+export interface BearerKey {
+  id: string;
+  name: string;
+  token: string;
+  enabled: boolean;
+  accessType: BearerKeyAccessType;
+  allowedGroups?: string[];
+  allowedServers?: string[];
 }
 
 // Auth types

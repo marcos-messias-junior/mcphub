@@ -47,6 +47,7 @@
   "dependencies": {
     "@apidevtools/swagger-parser": "^12.0.0",
     "@modelcontextprotocol/sdk": "^1.20.2",
+    "@node-oauth/oauth2-server": "^5.2.1",
     "@types/adm-zip": "^0.5.7",
     "@types/bcrypt": "^6.0.0",
     "@types/multer": "^1.4.13",
@@ -59,12 +60,12 @@
     "dotenv": "^16.6.1",
     "dotenv-expand": "^12.0.2",
     "express": "^4.21.2",
-    "express-validator": "^7.2.1",
+    "express-validator": "^7.3.1",
     "i18next": "^25.5.0",
     "i18next-fs-backend": "^2.6.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
-    "openai": "^4.104.0",
+    "openai": "^6.7.0",
     "openapi-types": "^12.1.3",
     "openid-client": "^6.8.1",
     "pg": "^8.16.3",
@@ -74,6 +75,7 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "typeorm": "^0.3.26",
+    "undici": "^7.16.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -109,12 +111,12 @@
     "jest": "^30.2.0",
     "jest-environment-node": "^30.0.5",
     "jest-mock-extended": "4.0.0",
-    "lucide-react": "^0.486.0",
+    "lucide-react": "^0.552.0",
     "next": "^15.5.0",
     "postcss": "^8.5.6",
     "prettier": "^3.6.2",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
     "react-i18next": "^15.7.2",
     "react-router-dom": "^7.8.2",
     "supertest": "^7.1.4",
@@ -135,7 +137,10 @@
   "pnpm": {
     "overrides": {
       "brace-expansion@1.1.11": "1.1.12",
-      "brace-expansion@2.0.1": "2.0.2"
+      "brace-expansion@2.0.1": "2.0.2",
+      "glob@10.4.5": "10.5.0",
+      "js-yaml": "4.1.1",
+      "jws@3.2.2": "4.0.1"
     }
   }
 }

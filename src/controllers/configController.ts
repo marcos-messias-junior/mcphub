@@ -1,9 +1,19 @@
 import { Request, Response } from 'express';
 import config from '../config/index.js';
-import { loadSettings, loadOriginalSettings } from '../config/index.js';
+import { loadSettings } from '../config/index.js';
 import { getDataService } from '../services/services.js';
 import { DataService } from '../services/dataService.js';
 import { IUser } from '../types/index.js';
+import {
+  getGroupDao,
+  getOAuthClientDao,
+  getOAuthTokenDao,
+  getServerDao,
+  getSystemConfigDao,
+  getUserConfigDao,
+  getUserDao,
+  getBearerKeyDao,
+} from '../dao/DaoFactory.js';
 
 const dataService: DataService = getDataService();
 
@@ -74,16 +84,38 @@ export const getPublicConfig = (req: Request, res: Response): void => {
 };
 
 /**
+ * Recursively remove null values from an object
+ */
+const removeNullValues = <T>(obj: T): T => {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => removeNullValues(item)) as T;
+  }
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== null) {
+        result[key] = removeNullValues(value);
+      }
+    }
+    return result as T;
+  }
+  return obj;
+};
+
+/**
  * Get MCP settings in JSON format for export/copy
  * Supports both full settings and individual server configuration
  */
-export const getMcpSettingsJson = (req: Request, res: Response): void => {
+export const getMcpSettingsJson = async (req: Request, res: Response): Promise<void> => {
   try {
     const { serverName } = req.query;
-    const settings = loadOriginalSettings();
     if (serverName && typeof serverName === 'string') {
-      // Return individual server configuration
-      const serverConfig = settings.mcpServers[serverName];
+      // Return individual server configuration using DAO
+      const serverDao = getServerDao();
+      const serverConfig = await serverDao.findById(serverName);
       if (!serverConfig) {
         res.status(404).json({
           success: false,
@@ -92,16 +124,56 @@ export const getMcpSettingsJson = (req: Request, res: Response): void => {
         return;
       }
 
+      // Remove the 'name' field from config as it's used as the key
+      const { name, ...configWithoutName } = serverConfig;
+      // Remove null values from the config
+      const cleanedConfig = removeNullValues(configWithoutName);
       res.json({
         success: true,
         data: {
           mcpServers: {
-            [serverName]: serverConfig,
+            [name]: cleanedConfig,
           },
         },
       });
     } else {
-      // Return full settings
+      // Return full settings via DAO layer (supports both file and database modes)
+      const [
+        servers,
+        users,
+        groups,
+        systemConfig,
+        userConfigs,
+        oauthClients,
+        oauthTokens,
+        bearerKeys,
+      ] = await Promise.all([
+        getServerDao().findAll(),
+        getUserDao().findAll(),
+        getGroupDao().findAll(),
+        getSystemConfigDao().get(),
+        getUserConfigDao().getAll(),
+        getOAuthClientDao().findAll(),
+        getOAuthTokenDao().findAll(),
+        getBearerKeyDao().findAll(),
+      ]);
+
+      const mcpServers: Record<string, any> = {};
+      for (const { name: serverConfigName, ...config } of servers) {
+        mcpServers[serverConfigName] = removeNullValues(config);
+      }
+
+      const settings = {
+        mcpServers,
+        users,
+        groups,
+        systemConfig,
+        userConfigs,
+        oauthClients,
+        oauthTokens,
+        bearerKeys,
+      };
+
       res.json({
         success: true,
         data: settings,

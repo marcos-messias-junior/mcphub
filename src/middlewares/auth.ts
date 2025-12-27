@@ -3,9 +3,17 @@ import jwt from 'jsonwebtoken';
 import { loadSettings } from '../config/index.js';
 import defaultConfig from '../config/index.js';
 import { JWT_SECRET } from '../config/jwt.js';
+import { getToken } from '../models/OAuth.js';
+import { isOAuthServerEnabled } from '../services/oauthServerService.js';
+import { getBearerKeyDao } from '../dao/index.js';
+import { BearerKey } from '../types/index.js';
 
-const validateBearerAuth = (req: Request, routingConfig: any): boolean => {
-  if (!routingConfig.enableBearerAuth) {
+const validateBearerAuth = async (req: Request): Promise<boolean> => {
+  const bearerKeyDao = getBearerKeyDao();
+  const enabledKeys = await bearerKeyDao.findEnabled();
+
+  // If there are no enabled keys, bearer auth via static keys is disabled
+  if (enabledKeys.length === 0) {
     return false;
   }
 
@@ -14,7 +22,21 @@ const validateBearerAuth = (req: Request, routingConfig: any): boolean => {
     return false;
   }
 
-  return authHeader.substring(7) === routingConfig.bearerAuthKey;
+  const token = authHeader.substring(7).trim();
+  if (!token) {
+    return false;
+  }
+
+  const matchingKey: BearerKey | undefined = enabledKeys.find((key) => key.token === token);
+  if (!matchingKey) {
+    console.warn('Bearer auth failed: token did not match any configured bearer key');
+    return false;
+  }
+
+  console.log(
+    `Bearer auth succeeded with key id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
+  );
+  return true;
 };
 
 const readonlyAllowPaths = ['/tools/call/'];
@@ -34,7 +56,7 @@ const checkReadonly = (req: Request): boolean => {
 };
 
 // Middleware to authenticate JWT token
-export const auth = (req: Request, res: Response, next: NextFunction): void => {
+export const auth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   const t = (req as any).t;
   if (!checkReadonly(req)) {
     res.status(403).json({ success: false, message: t('api.errors.readonly') });
@@ -45,8 +67,6 @@ export const auth = (req: Request, res: Response, next: NextFunction): void => {
   const routingConfig = loadSettings().systemConfig?.routing || {
     enableGlobalRoute: true,
     enableGroupNameRoute: true,
-    enableBearerAuth: false,
-    bearerAuthKey: '',
     skipAuth: false,
   };
 
@@ -55,10 +75,32 @@ export const auth = (req: Request, res: Response, next: NextFunction): void => {
     return;
   }
 
-  // Check if bearer auth is enabled and validate it
-  if (validateBearerAuth(req, routingConfig)) {
+  // Check if bearer auth via configured keys can validate this request
+  if (await validateBearerAuth(req)) {
     next();
     return;
+  }
+
+  // Check for OAuth access token in Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ') && isOAuthServerEnabled()) {
+    const accessToken = authHeader.substring(7);
+    const oauthToken = await getToken(accessToken);
+
+    if (oauthToken && oauthToken.accessToken === accessToken) {
+      // Valid OAuth token - look up user to get admin status
+      const { findUserByUsername } = await import('../models/User.js');
+      const user = await findUserByUsername(oauthToken.username);
+
+      // Set user context with proper admin status
+      (req as any).user = {
+        username: oauthToken.username,
+        isAdmin: user?.isAdmin || false,
+      };
+      (req as any).oauthToken = oauthToken;
+      next();
+      return;
+    }
   }
 
   // Get token from header or query parameter
@@ -80,7 +122,7 @@ export const auth = (req: Request, res: Response, next: NextFunction): void => {
     return;
   }
 
-  // Verify token
+  // Verify JWT token
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
 

@@ -7,7 +7,22 @@ import {
   handleMcpOtherRequest,
   getGroup,
   getConnectionCount,
+  transports,
 } from './sseService.js';
+
+// Default mock system config
+const defaultSystemConfig = {
+  routing: {
+    enableGlobalRoute: true,
+    enableGroupNameRoute: true,
+    enableBearerAuth: false,
+    bearerAuthKey: 'test-key',
+  },
+  enableSessionRebuild: false,
+};
+
+// Mutable mock config that can be changed in tests
+let currentSystemConfig = { ...defaultSystemConfig };
 
 // Mock dependencies
 jest.mock('./mcpService.js', () => ({
@@ -24,19 +39,44 @@ jest.mock('../config/index.js', () => {
   return {
     __esModule: true,
     default: config,
-    loadSettings: jest.fn(() => ({
-      mcpServers: {},
-      systemConfig: {
-        routing: {
-          enableGlobalRoute: true,
-          enableGroupNameRoute: true,
-          enableBearerAuth: false,
-          bearerAuthKey: 'test-key',
-        },
-      },
-    })),
   };
 });
+
+// Mock DAO layer
+jest.mock('../dao/index.js', () => ({
+  getSystemConfigDao: jest.fn(() => ({
+    get: jest.fn().mockImplementation(() => Promise.resolve(currentSystemConfig)),
+  })),
+  getBearerKeyDao: jest.fn(() => ({
+    // Keep these unit tests aligned with legacy routing semantics:
+    // enableBearerAuth + bearerAuthKey -> one enabled key (token=bearerAuthKey)
+    // otherwise -> no enabled keys (bearer auth effectively disabled)
+    findEnabled: jest.fn().mockImplementation(async () => {
+      const routing = (currentSystemConfig as any)?.routing || {};
+      const enabled = !!routing.enableBearerAuth;
+      const token = String(routing.bearerAuthKey || '').trim();
+      if (!enabled || !token) {
+        return [];
+      }
+      return [
+        {
+          id: 'test-key-id',
+          name: 'default',
+          token,
+          enabled: true,
+          accessType: 'all',
+          allowedGroups: [],
+          allowedServers: [],
+        },
+      ];
+    }),
+  })),
+}));
+
+// Mock oauthBearer
+jest.mock('../utils/oauthBearer.js', () => ({
+  resolveOAuthUserFromToken: jest.fn().mockResolvedValue(null),
+}));
 
 jest.mock('./userContextService.js', () => ({
   UserContextService: {
@@ -55,12 +95,9 @@ jest.mock('@modelcontextprotocol/sdk/server/sse.js', () => ({
 }));
 
 jest.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
-  StreamableHTTPServerTransport: jest.fn().mockImplementation(() => ({
-    sessionId: 'test-session-id',
-    connect: jest.fn(),
-    handleRequest: jest.fn(),
-    onclose: null,
-  })),
+  StreamableHTTPServerTransport: jest
+    .fn()
+    .mockImplementation(() => mockStreamableHTTPServerTransport),
 }));
 
 jest.mock('@modelcontextprotocol/sdk/types.js', () => ({
@@ -69,46 +106,108 @@ jest.mock('@modelcontextprotocol/sdk/types.js', () => ({
 
 // Import mocked modules
 import { getMcpServer } from './mcpService.js';
-import { loadSettings } from '../config/index.js';
 import { UserContextService } from './userContextService.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
+// Helper function to update the mock system config
+const setMockSystemConfig = (config: typeof defaultSystemConfig) => {
+  currentSystemConfig = config;
+};
+
+type MockResponse = Response & {
+  status: jest.Mock;
+  send: jest.Mock;
+  json: jest.Mock;
+  setHeader: jest.Mock;
+  headersStore: Record<string, string>;
+};
+
+const EXPECTED_METADATA_URL = 'http://localhost:3000/.well-known/oauth-protected-resource/test';
+
+// Create mock instances for testing
+const mockStreamableHTTPServerTransport = {
+  sessionId: 'test-session-id',
+  connect: jest.fn(),
+  handleRequest: jest.fn(),
+  onclose: null,
+};
+
 // Mock Express Request and Response
-const createMockRequest = (overrides: Partial<Request> = {}): Request =>
-  ({
-    headers: {},
+const createMockRequest = (overrides: Partial<Request> = {}): Request => {
+  const { headers: overrideHeaders, ...restOverrides } = overrides;
+
+  const headers = {
+    host: 'localhost:3000',
+    ...(overrideHeaders as Record<string, unknown>),
+  };
+
+  const req = {
+    headers,
     params: {},
     query: {},
     body: {},
-    ...overrides,
-  }) as Request;
+    protocol: 'http',
+    originalUrl: '/test/sse',
+    ...restOverrides,
+  } as Request;
 
-const createMockResponse = (): Response => {
+  req.params = req.params || {};
+  req.query = req.query || {};
+  req.body = req.body || {};
+  req.protocol = req.protocol || 'http';
+  req.originalUrl = req.originalUrl || '/test/sse';
+
+  return req;
+};
+
+const createMockResponse = (): MockResponse => {
+  const headers: Record<string, string> = {};
+
   const res = {
     status: jest.fn().mockReturnThis(),
     send: jest.fn().mockReturnThis(),
     json: jest.fn().mockReturnThis(),
+    setHeader: jest.fn((key: string, value: string) => {
+      headers[key] = value;
+      return res;
+    }),
     on: jest.fn(),
-  } as unknown as Response;
+    headersStore: headers,
+  } as unknown as MockResponse;
+
   return res;
+};
+
+const expectBearerUnauthorized = (
+  res: MockResponse,
+  description: 'No authorization provided' | 'Invalid bearer token',
+): void => {
+  expect(res.status).toHaveBeenCalledWith(401);
+  expect(res.json).toHaveBeenCalledWith({
+    error: 'invalid_token',
+    error_description: description,
+    resource_metadata: EXPECTED_METADATA_URL,
+  });
+  expect(res.setHeader).toHaveBeenCalledWith(
+    'WWW-Authenticate',
+    `Bearer error="invalid_token", error_description="${description}", resource_metadata="${EXPECTED_METADATA_URL}"`,
+  );
 };
 
 describe('sseService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // Reset settings cache
-    (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-      mcpServers: {},
-      systemConfig: {
-        routing: {
-          enableGlobalRoute: true,
-          enableGroupNameRoute: true,
-          enableBearerAuth: false,
-          bearerAuthKey: 'test-key',
-        },
+    // Reset settings cache to default
+    setMockSystemConfig({
+      routing: {
+        enableGlobalRoute: true,
+        enableGroupNameRoute: true,
+        enableBearerAuth: false,
+        bearerAuthKey: 'test-key',
       },
+      enableSessionRebuild: false, // Default to false for tests
     });
   });
 
@@ -126,15 +225,12 @@ describe('sseService', () => {
     });
 
     it('should return 401 when bearer auth is enabled but no authorization header', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -143,20 +239,16 @@ describe('sseService', () => {
 
       await handleSseConnection(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.send).toHaveBeenCalledWith('Bearer authentication required or invalid token');
+      expectBearerUnauthorized(res, 'No authorization provided');
     });
 
     it('should return 401 when bearer auth is enabled with invalid token', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -167,20 +259,16 @@ describe('sseService', () => {
 
       await handleSseConnection(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.send).toHaveBeenCalledWith('Bearer authentication required or invalid token');
+      expectBearerUnauthorized(res, 'Invalid bearer token');
     });
 
     it('should pass when bearer auth is enabled with valid token', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -222,15 +310,12 @@ describe('sseService', () => {
 
   describe('handleSseConnection', () => {
     it('should reject global routes when disabled', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: false,
-            enableGroupNameRoute: true,
-            enableBearerAuth: false,
-            bearerAuthKey: '',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: false,
+          enableGroupNameRoute: true,
+          enableBearerAuth: false,
+          bearerAuthKey: '',
         },
       });
 
@@ -318,15 +403,12 @@ describe('sseService', () => {
     });
 
     it('should return 401 when bearer auth fails', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -337,22 +419,18 @@ describe('sseService', () => {
 
       await handleSseMessage(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.send).toHaveBeenCalledWith('Bearer authentication required or invalid token');
+      expectBearerUnauthorized(res, 'No authorization provided');
     });
   });
 
   describe('handleMcpPostRequest', () => {
     it('should reject global routes when disabled', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: false,
-            enableGroupNameRoute: true,
-            enableBearerAuth: false,
-            bearerAuthKey: '',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: false,
+          enableGroupNameRoute: true,
+          enableBearerAuth: false,
+          bearerAuthKey: '',
         },
       });
 
@@ -383,7 +461,7 @@ describe('sseService', () => {
       expect(getMcpServer).toHaveBeenCalled();
     });
 
-    it('should return error for invalid session', async () => {
+    it('should return error when session rebuild is disabled and session is invalid', async () => {
       const req = createMockRequest({
         params: { group: 'test-group' },
         headers: { 'mcp-session-id': 'invalid-session' },
@@ -393,6 +471,7 @@ describe('sseService', () => {
 
       await handleMcpPostRequest(req, res);
 
+      // When session rebuild is disabled, invalid sessions should return an error
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith({
         jsonrpc: '2.0',
@@ -404,16 +483,42 @@ describe('sseService', () => {
       });
     });
 
+    it('should transparently rebuild invalid session when enabled', async () => {
+      // Enable session rebuild for this test
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: false,
+          bearerAuthKey: 'test-key',
+        },
+        enableSessionRebuild: true, // Enable session rebuild
+      });
+
+      const req = createMockRequest({
+        params: { group: 'test-group' },
+        headers: { 'mcp-session-id': 'invalid-session' },
+        body: { method: 'someMethod' },
+      });
+      const res = createMockResponse();
+
+      await handleMcpPostRequest(req, res);
+
+      // With session rebuild enabled, invalid sessions should be transparently rebuilt
+      expect(StreamableHTTPServerTransport).toHaveBeenCalled();
+      const mockInstance = (
+        StreamableHTTPServerTransport as jest.MockedClass<typeof StreamableHTTPServerTransport>
+      ).mock.results[0].value;
+      expect(mockInstance.handleRequest).toHaveBeenCalledWith(req, res, req.body);
+    });
+
     it('should return 401 when bearer auth fails', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -425,8 +530,7 @@ describe('sseService', () => {
 
       await handleMcpPostRequest(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.send).toHaveBeenCalledWith('Bearer authentication required or invalid token');
+      expectBearerUnauthorized(res, 'No authorization provided');
     });
   });
 
@@ -442,29 +546,80 @@ describe('sseService', () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.send).toHaveBeenCalledWith('Invalid or missing session ID');
     });
+    it('should return error when session rebuild is disabled in handleMcpOtherRequest', async () => {
+      // Clear transports before test
+      Object.keys(transports).forEach((key) => delete transports[key]);
 
-    it('should return 400 for invalid session ID', async () => {
+      // Enable bearer auth for this test
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
+        },
+        enableSessionRebuild: false, // Disable session rebuild
+      });
+
+      // Mock user context to exist
+      const mockGetCurrentUser = jest.fn(() => ({ username: 'testuser' }));
+      (UserContextService.getInstance as jest.MockedFunction<any>).mockReturnValue({
+        getCurrentUser: mockGetCurrentUser,
+      });
+
       const req = createMockRequest({
-        headers: { 'mcp-session-id': 'invalid-session' },
+        headers: {
+          'mcp-session-id': 'invalid-session',
+          authorization: 'Bearer test-key',
+        },
+        params: { group: 'test-group' },
       });
       const res = createMockResponse();
 
       await handleMcpOtherRequest(req, res);
 
+      // Should return 400 error when session rebuild is disabled
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.send).toHaveBeenCalledWith('Invalid or missing session ID');
     });
 
+    it('should transparently rebuild invalid session in handleMcpOtherRequest when enabled', async () => {
+      // Enable bearer auth and session rebuild for this test
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
+        },
+        enableSessionRebuild: true, // Enable session rebuild
+      });
+
+      const req = createMockRequest({
+        headers: {
+          'mcp-session-id': 'invalid-session',
+          authorization: 'Bearer test-key',
+        },
+      });
+      const res = createMockResponse();
+
+      await handleMcpOtherRequest(req, res);
+
+      // Should not return 400 error, but instead transparently rebuild the session
+      expect(res.status).not.toHaveBeenCalledWith(400);
+      expect(res.send).not.toHaveBeenCalledWith('Invalid or missing session ID');
+
+      // Should attempt to handle the request (session was rebuilt)
+      expect(mockStreamableHTTPServerTransport.handleRequest).toHaveBeenCalled();
+    });
+
     it('should return 401 when bearer auth fails', async () => {
-      (loadSettings as jest.MockedFunction<typeof loadSettings>).mockReturnValue({
-        mcpServers: {},
-        systemConfig: {
-          routing: {
-            enableGlobalRoute: true,
-            enableGroupNameRoute: true,
-            enableBearerAuth: true,
-            bearerAuthKey: 'test-key',
-          },
+      setMockSystemConfig({
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: 'test-key',
         },
       });
 
@@ -475,8 +630,7 @@ describe('sseService', () => {
 
       await handleMcpOtherRequest(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(res.send).toHaveBeenCalledWith('Bearer authentication required or invalid token');
+      expectBearerUnauthorized(res, 'No authorization provided');
     });
   });
 });

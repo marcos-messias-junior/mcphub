@@ -4,10 +4,13 @@ import config from '../config/index.js';
 import {
   getAllServers,
   getAllSettings,
+  getServerConfig,
   createServer,
+  batchCreateServers,
   updateServer,
   deleteServer,
   toggleServer,
+  reloadServer,
   toggleTool,
   updateToolDescription,
   togglePrompt,
@@ -18,6 +21,7 @@ import {
   getGroups,
   getGroup,
   createNewGroup,
+  batchCreateGroups,
   updateExistingGroup,
   deleteExistingGroup,
   addServerToExistingGroup,
@@ -80,6 +84,34 @@ import {
   getGroupOpenAPISpec,
 } from '../controllers/openApiController.js';
 import { handleOAuthCallback } from '../controllers/oauthCallbackController.js';
+import {
+  getAuthorize,
+  postAuthorize,
+  postToken,
+  getUserInfo,
+  getMetadata,
+  getProtectedResourceMetadata,
+} from '../controllers/oauthServerController.js';
+import {
+  getAllClients,
+  getClient,
+  createClient,
+  updateClient,
+  deleteClient,
+  regenerateSecret,
+} from '../controllers/oauthClientController.js';
+import {
+  registerClient,
+  getClientConfiguration,
+  updateClientConfiguration,
+  deleteClientRegistration,
+} from '../controllers/oauthDynamicRegistrationController.js';
+import {
+  getBearerKeys,
+  createBearerKey,
+  updateBearerKey,
+  deleteBearerKey,
+} from '../controllers/bearerKeyController.js';
 import { auth } from '../middlewares/auth.js';
 
 const router = express.Router();
@@ -91,13 +123,30 @@ export const initRoutes = (app: express.Application): void => {
   // OAuth callback endpoint (no auth required, public callback URL)
   app.get('/oauth/callback', handleOAuthCallback);
 
+  // OAuth Authorization Server endpoints (no auth required for OAuth flow)
+  app.get('/oauth/authorize', getAuthorize);
+  app.post('/oauth/authorize', express.urlencoded({ extended: true }), postAuthorize);
+  app.post('/oauth/token', express.urlencoded({ extended: true }), postToken); // Public endpoint for token exchange
+  app.get('/oauth/userinfo', getUserInfo); // Validates OAuth token
+  app.get('/.well-known/oauth-authorization-server', getMetadata); // Public metadata endpoint
+  app.get('/.well-known/oauth-protected-resource', getProtectedResourceMetadata); // Public protected resource metadata
+
+  // RFC 7591 Dynamic Client Registration endpoints (public for registration)
+  app.post('/oauth/register', registerClient); // Register new OAuth client
+  app.get('/oauth/register/:clientId', getClientConfiguration); // Read client configuration
+  app.put('/oauth/register/:clientId', updateClientConfiguration); // Update client configuration
+  app.delete('/oauth/register/:clientId', deleteClientRegistration); // Delete client registration
+
   // API routes protected by auth middleware in middlewares/index.ts
   router.get('/servers', getAllServers);
+  router.get('/servers/:name', getServerConfig);
   router.get('/settings', getAllSettings);
   router.post('/servers', createServer);
+  router.post('/servers/batch', batchCreateServers);
   router.put('/servers/:name', updateServer);
   router.delete('/servers/:name', deleteServer);
   router.post('/servers/:name/toggle', toggleServer);
+  router.post('/servers/:name/reload', reloadServer);
   router.post('/servers/:serverName/tools/:toolName/toggle', toggleTool);
   router.put('/servers/:serverName/tools/:toolName/description', updateToolDescription);
   router.post('/servers/:serverName/prompts/:promptName/toggle', togglePrompt);
@@ -108,6 +157,7 @@ export const initRoutes = (app: express.Application): void => {
   router.get('/groups', getGroups);
   router.get('/groups/:id', getGroup);
   router.post('/groups', createNewGroup);
+  router.post('/groups/batch', batchCreateGroups);
   router.put('/groups/:id', updateExistingGroup);
   router.delete('/groups/:id', deleteExistingGroup);
   router.post('/groups/:id/servers', addServerToExistingGroup);
@@ -127,6 +177,27 @@ export const initRoutes = (app: express.Application): void => {
   router.put('/users/:username', updateExistingUser);
   router.delete('/users/:username', deleteExistingUser);
   router.get('/users-stats', getUserStats);
+
+  // OAuth Client management routes (admin only)
+  router.get('/oauth/clients', getAllClients);
+  router.get('/oauth/clients/:clientId', getClient);
+  router.post(
+    '/oauth/clients',
+    [
+      check('name', 'Client name is required').not().isEmpty(),
+      check('redirectUris', 'At least one redirect URI is required').isArray({ min: 1 }),
+    ],
+    createClient,
+  );
+  router.put('/oauth/clients/:clientId', updateClient);
+  router.delete('/oauth/clients/:clientId', deleteClient);
+  router.post('/oauth/clients/:clientId/regenerate-secret', regenerateSecret);
+
+  // Bearer authentication key management (admin only)
+  router.get('/auth/keys', getBearerKeys);
+  router.post('/auth/keys', createBearerKey);
+  router.put('/auth/keys/:id', updateBearerKey);
+  router.delete('/auth/keys/:id', deleteBearerKey);
 
   // Tool management routes
   router.post('/tools/call/:server', callTool);

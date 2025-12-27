@@ -14,6 +14,10 @@ interface McpServerConfig {
   type?: string;
   url?: string;
   headers?: Record<string, string>;
+  openapi?: {
+    version: string;
+    url: string;
+  };
 }
 
 interface ImportJsonFormat {
@@ -29,29 +33,16 @@ const JSONImportForm: React.FC<JSONImportFormProps> = ({ onSuccess, onCancel }) 
     null,
   );
 
-  const examplePlaceholder = `STDIO example:
-{
+  const examplePlaceholder = `{
   "mcpServers": {
     "stdio-server-example": {
       "command": "npx",
       "args": ["-y", "mcp-server-example"]
-    }
-  }
-}
-
-SSE example:
-{
-  "mcpServers": {
+    },
     "sse-server-example": {
       "type": "sse",
       "url": "http://localhost:3000"
-    }
-  }
-}
-
-HTTP example:
-{
-  "mcpServers": {
+    },
     "http-server-example": {
       "type": "streamable-http",
       "url": "http://localhost:3001",
@@ -59,9 +50,18 @@ HTTP example:
         "Content-Type": "application/json",
         "Authorization": "Bearer your-token"
       }
+    },
+    "openapi-server-example": {
+      "type": "openapi",
+      "openapi": {
+        "url": "https://petstore.swagger.io/v2/swagger.json"
+      }
     }
   }
-}`;
+}
+
+Supports: STDIO, SSE, HTTP (streamable-http), OpenAPI
+All servers will be imported in a single efficient batch operation.`;
 
   const parseAndValidateJson = (input: string): ImportJsonFormat | null => {
     try {
@@ -95,6 +95,9 @@ HTTP example:
         if (config.headers) {
           normalizedConfig.headers = config.headers;
         }
+      } else if (config.type === 'openapi') {
+        normalizedConfig.type = 'openapi';
+        normalizedConfig.openapi = config.openapi;
       } else {
         // Default to stdio
         normalizedConfig.type = 'stdio';
@@ -118,38 +121,31 @@ HTTP example:
     setError(null);
 
     try {
-      let successCount = 0;
-      const errors: string[] = [];
+      // Use batch import API for better performance
+      const result = await apiPost('/servers/batch', {
+        servers: previewServers,
+      });
 
-      for (const server of previewServers) {
-        try {
-          const result = await apiPost('/servers', {
-            name: server.name,
-            config: server.config,
-          });
+      if (result.success && result.data) {
+        const { successCount, failureCount, results } = result.data;
 
-          if (result.success) {
-            successCount++;
-          } else {
-            errors.push(`${server.name}: ${result.message || t('jsonImport.addFailed')}`);
-          }
-        } catch (err) {
-          errors.push(
-            `${server.name}: ${err instanceof Error ? err.message : t('jsonImport.addFailed')}`,
+        if (failureCount > 0) {
+          const errors = results
+            .filter((r: any) => !r.success)
+            .map((r: any) => `${r.name}: ${r.message || t('jsonImport.addFailed')}`);
+
+          setError(
+            t('jsonImport.partialSuccess', { count: successCount, total: previewServers.length }) +
+              '\n' +
+              errors.join('\n'),
           );
         }
-      }
 
-      if (errors.length > 0) {
-        setError(
-          t('jsonImport.partialSuccess', { count: successCount, total: previewServers.length }) +
-            '\n' +
-            errors.join('\n'),
-        );
-      }
-
-      if (successCount > 0) {
-        onSuccess();
+        if (successCount > 0) {
+          onSuccess();
+        }
+      } else {
+        setError(result.message || t('jsonImport.importFailed'));
       }
     } catch (err) {
       console.error('Import error:', err);

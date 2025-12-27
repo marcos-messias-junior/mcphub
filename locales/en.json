@@ -61,6 +61,7 @@
     "emptyFields": "Username and password cannot be empty",
     "loginFailed": "Login failed, please check your username and password",
     "loginError": "An error occurred during login",
+    "serverUnavailable": "Unable to connect to the server. Please check your network connection or try again later",
     "currentPassword": "Current Password",
     "newPassword": "New Password",
     "confirmPassword": "Confirm Password",
@@ -116,6 +117,9 @@
     "enabled": "Enabled",
     "enable": "Enable",
     "disable": "Disable",
+    "reload": "Reload",
+    "reloadSuccess": "Server reloaded successfully",
+    "reloadError": "Failed to reload server {{serverName}}",
     "requestOptions": "Connection Configuration",
     "timeout": "Request Timeout",
     "timeoutDescription": "Timeout for requests to the MCP server (ms)",
@@ -123,6 +127,11 @@
     "maxTotalTimeoutDescription": "Maximum total timeout for requests sent to the MCP server (ms) (Use with progress notifications)",
     "resetTimeoutOnProgress": "Reset Timeout on Progress",
     "resetTimeoutOnProgressDescription": "Reset timeout on progress notifications",
+    "keepAlive": "Keep-Alive Configuration",
+    "enableKeepAlive": "Enable Keep-Alive",
+    "keepAliveDescription": "Send periodic ping requests to maintain the connection. Useful for long-running connections that may timeout.",
+    "keepAliveInterval": "Interval (ms)",
+    "keepAliveIntervalDescription": "Time between keep-alive pings in milliseconds (default: 60000ms = 1 minute)",
     "remove": "Remove",
     "toggleError": "Failed to toggle server {{serverName}}",
     "alreadyExists": "Server {{serverName}} already exists",
@@ -245,7 +254,11 @@
     "type": "Type",
     "repeated": "Repeated",
     "valueHint": "Value Hint",
-    "choices": "Choices"
+    "choices": "Choices",
+    "actions": "Actions",
+    "saving": "Saving...",
+    "active": "Active",
+    "inactive": "Inactive"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -268,7 +281,7 @@
       "recentServers": "Recent Servers"
     },
     "servers": {
-      "title": "Servers Management"
+      "title": "Server Management"
     },
     "groups": {
       "title": "Group Management"
@@ -284,7 +297,8 @@
       "appearance": "Appearance",
       "routeConfig": "Security",
       "installConfig": "Installation",
-      "smartRouting": "Smart Routing"
+      "smartRouting": "Smart Routing",
+      "oauthServer": "OAuth Server"
     },
     "market": {
       "title": "Market Hub - Local and Cloud Markets"
@@ -382,6 +396,16 @@
     "perPage": "Per page",
     "confirmVariablesMessage": "Please ensure these variables are properly defined in your runtime environment. Continue installing server?",
     "confirmAndInstall": "Confirm and Install"
+  },
+  "oauthServer": {
+    "authorizeTitle": "Authorize Application",
+    "authorizeSubtitle": "Allow this application to access your MCPHub account.",
+    "buttons": {
+      "approve": "Allow access",
+      "deny": "Deny",
+      "approveSubtitle": "Recommended if you trust this application.",
+      "denySubtitle": "You can always grant access later."
+    }
   },
   "cloud": {
     "title": "Cloud Support",
@@ -520,7 +544,9 @@
     "description": "Description",
     "messages": "Messages",
     "noDescription": "No description available",
-    "runPromptWithName": "Get Prompt: {{name}}"
+    "runPromptWithName": "Get Prompt: {{name}}",
+    "descriptionUpdateSuccess": "Prompt description updated successfully",
+    "descriptionUpdateFailed": "Failed to update prompt description"
   },
   "settings": {
     "enableGlobalRoute": "Enable Global Route",
@@ -532,6 +558,28 @@
     "bearerAuthKey": "Bearer Authentication Key",
     "bearerAuthKeyDescription": "The authentication key that will be required in the Bearer token",
     "bearerAuthKeyPlaceholder": "Enter bearer authentication key",
+    "bearerKeysSectionTitle": "Keys",
+    "bearerKeysSectionDescription": "Manage multiple keys with different access scopes.",
+    "noBearerKeys": "No keys configured yet.",
+    "bearerKeyName": "Name",
+    "bearerKeyToken": "Token",
+    "bearerKeyEnabled": "Enabled",
+    "bearerKeyAccessType": "Access scope",
+    "bearerKeyAccessAll": "All",
+    "bearerKeyAccessGroups": "Groups",
+    "bearerKeyAccessServers": "Servers",
+    "bearerKeyAccessCustom": "Custom",
+    "bearerKeyAllowedGroups": "Allowed groups",
+    "bearerKeyAllowedServers": "Allowed servers",
+    "addBearerKey": "Add key",
+    "addBearerKeyButton": "Create",
+    "bearerKeyRequired": "Name and token are required",
+    "deleteBearerKeyConfirm": "Are you sure you want to delete this key?",
+    "generate": "Generate",
+    "selectGroups": "Select Groups",
+    "selectServers": "Select Servers",
+    "selectAtLeastOneGroup": "Please select at least one group",
+    "selectAtLeastOneServer": "Please select at least one server",
     "skipAuth": "Skip Authentication",
     "skipAuthDescription": "Bypass login requirement for frontend and API access (DEFAULT OFF for security)",
     "pythonIndexUrl": "Python Package Repository URL",
@@ -574,6 +622,8 @@
     "systemSettings": "System Settings",
     "nameSeparatorLabel": "Name Separator",
     "nameSeparatorDescription": "Character used to separate server name and tool/prompt name (default: -)",
+    "enableSessionRebuild": "Enable Server Session Rebuild",
+    "enableSessionRebuildDescription": "When enabled, applies the improved server session rebuild code for better session management experience",
     "restartRequired": "Configuration saved. It is recommended to restart the application to ensure all services load the new settings correctly.",
     "exportMcpSettings": "Export Settings",
     "mcpSettingsJson": "MCP Settings JSON",
@@ -581,7 +631,33 @@
     "copyToClipboard": "Copy to Clipboard",
     "downloadJson": "Download JSON",
     "exportSuccess": "Settings exported successfully",
-    "exportError": "Failed to fetch settings"
+    "exportError": "Failed to fetch settings",
+    "enableOauthServer": "Enable OAuth Server",
+    "enableOauthServerDescription": "Allow MCPHub to issue OAuth tokens for external clients",
+    "requireClientSecret": "Require Client Secret",
+    "requireClientSecretDescription": "When enabled, confidential clients must present a client secret (disable for PKCE-only clients)",
+    "requireState": "Require State Parameter",
+    "requireStateDescription": "Reject authorization requests that omit the OAuth state parameter",
+    "accessTokenLifetime": "Access Token Lifetime (seconds)",
+    "accessTokenLifetimeDescription": "How long issued access tokens remain valid",
+    "accessTokenLifetimePlaceholder": "e.g. 3600",
+    "refreshTokenLifetime": "Refresh Token Lifetime (seconds)",
+    "refreshTokenLifetimeDescription": "How long refresh tokens remain valid",
+    "refreshTokenLifetimePlaceholder": "e.g. 1209600",
+    "authorizationCodeLifetime": "Authorization Code Lifetime (seconds)",
+    "authorizationCodeLifetimeDescription": "How long authorization codes remain valid before they can be exchanged",
+    "authorizationCodeLifetimePlaceholder": "e.g. 300",
+    "allowedScopes": "Allowed Scopes",
+    "allowedScopesDescription": "Comma-separated list of scopes users can approve during authorization",
+    "allowedScopesPlaceholder": "e.g. read, write",
+    "enableDynamicRegistration": "Enable Dynamic Client Registration",
+    "dynamicRegistrationDescription": "Allow RFC 7591 compliant clients to self-register using the public endpoint",
+    "dynamicRegistrationAllowedGrantTypes": "Allowed Grant Types",
+    "dynamicRegistrationAllowedGrantTypesDescription": "Comma-separated list of grants permitted for dynamically registered clients",
+    "dynamicRegistrationAllowedGrantTypesPlaceholder": "e.g. authorization_code, refresh_token",
+    "dynamicRegistrationAuth": "Require Authentication",
+    "dynamicRegistrationAuthDescription": "Protect the registration endpoint so only authenticated requests can register clients",
+    "invalidNumberInput": "Please enter a valid non-negative number"
   },
   "dxt": {
     "upload": "Upload",
@@ -623,6 +699,22 @@
     "importFailed": "Failed to import servers",
     "partialSuccess": "Imported {{count}} of {{total}} servers successfully. Some servers failed:"
   },
+  "groupImport": {
+    "button": "Import",
+    "title": "Import Groups from JSON",
+    "inputLabel": "Group Configuration JSON",
+    "inputHelp": "Paste your group configuration JSON. Each group can contain a list of servers.",
+    "preview": "Preview",
+    "previewTitle": "Preview Groups to Import",
+    "import": "Import",
+    "importing": "Importing...",
+    "invalidFormat": "Invalid JSON format. The JSON must contain a 'groups' array.",
+    "missingName": "Each group must have a 'name' field.",
+    "parseError": "Failed to parse JSON. Please check the format and try again.",
+    "addFailed": "Failed to add group",
+    "importFailed": "Failed to import groups",
+    "partialSuccess": "Imported {{count}} of {{total}} groups successfully. Some groups failed:"
+  },
   "users": {
     "add": "Add User",
     "addNew": "Add New User",
@@ -634,9 +726,13 @@
     "password": "Password",
     "newPassword": "New Password",
     "confirmPassword": "Confirm Password",
+    "changePassword": "Change Password",
     "adminRole": "Administrator",
     "admin": "Admin",
     "user": "User",
+    "role": "Role",
+    "actions": "Actions",
+    "addFirst": "Add your first user",
     "permissions": "Permissions",
     "adminPermissions": "Full system access",
     "userPermissions": "Limited access",
@@ -675,6 +771,7 @@
       "failedToRemoveServer": "Server not found or failed to remove",
       "internalServerError": "Internal server error",
       "failedToGetServers": "Failed to get servers information",
+      "failedToReloadServer": "Failed to reload server",
       "failedToGetServerSettings": "Failed to get server settings",
       "failedToGetServerConfig": "Failed to get server configuration",
       "failedToSaveSettings": "Failed to save settings",
