@@ -107,8 +107,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
   const headerToken = req.header('x-auth-token');
   const queryToken = req.query.token as string;
   
-  // Also check for Bearer token in Authorization header
-  const authHeader = req.headers.authorization;
+  // Also check for Bearer token in Authorization header (reuse authHeader from above)
   let bearerToken = null;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     bearerToken = authHeader.substring(7);
