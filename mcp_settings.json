@@ -44,5 +44,6 @@
         "requiresAuthentication": false
       }
     }
-  }
+  },
+  "bearerKeys": []
 }
