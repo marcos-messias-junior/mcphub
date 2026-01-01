@@ -7,6 +7,7 @@ import {
   BatchCreateServersResponse,
   BatchServerResult,
   ServerConfig,
+  ServerInfo,
 } from '../types/index.js';
 import {
   getServersInfo,
@@ -24,13 +25,66 @@ import { createSafeJSON } from '../utils/serialization.js';
 import { cloneDefaultOAuthServerConfig } from '../constants/oauthServerDefaults.js';
 import { getServerDao, getGroupDao, getSystemConfigDao } from '../dao/DaoFactory.js';
 import { getBearerKeyDao } from '../dao/DaoFactory.js';
+import { UserContextService } from '../services/userContextService.js';
 
-export const getAllServers = async (_: Request, res: Response): Promise<void> => {
+export const getAllServers = async (req: Request, res: Response): Promise<void> => {
   try {
-    const serversInfo = await getServersInfo();
+    // Parse pagination parameters from query string
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
+    // Validate pagination parameters
+    if (page < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Page number must be greater than 0',
+      });
+      return;
+    }
+
+    if (limit !== undefined && (limit < 1 || limit > 1000)) {
+      res.status(400).json({
+        success: false,
+        message: 'Limit must be between 1 and 1000',
+      });
+      return;
+    }
+
+    // Get current user for filtering
+    const currentUser = UserContextService.getInstance().getCurrentUser();
+    const isAdmin = !currentUser || currentUser.isAdmin;
+
+    // Get servers info with pagination if limit is specified
+    let serversInfo: Omit<ServerInfo, 'client' | 'transport'>[];
+    let pagination = undefined;
+
+    if (limit !== undefined) {
+      // Use DAO layer pagination with proper filtering
+      const serverDao = getServerDao();
+      const paginatedResult = isAdmin
+        ? await serverDao.findAllPaginated(page, limit)
+        : await serverDao.findByOwnerPaginated(currentUser!.username, page, limit);
+      
+      // Get runtime info for paginated servers
+      serversInfo = await getServersInfo(page, limit, currentUser);
+      
+      pagination = {
+        page: paginatedResult.page,
+        limit: paginatedResult.limit,
+        total: paginatedResult.total,
+        totalPages: paginatedResult.totalPages,
+        hasNextPage: paginatedResult.page < paginatedResult.totalPages,
+        hasPrevPage: paginatedResult.page > 1,
+      };
+    } else {
+      // No pagination, get all servers (will be filtered by mcpService)
+      serversInfo = await getServersInfo();
+    }
+
     const response: ApiResponse = {
       success: true,
       data: createSafeJSON(serversInfo),
+      ...(pagination && { pagination }),
     };
     res.json(response);
   } catch (error) {
@@ -564,10 +618,9 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
       });
     }
   } catch (error) {
-    console.error('Failed to update server:', error);
     res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : 'Internal server error',
+      message: 'Internal server error',
     });
   }
 };
