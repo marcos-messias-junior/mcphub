@@ -226,6 +226,9 @@
     "cancel": "取消",
     "back": "返回",
     "refresh": "刷新",
+    "search": "搜索",
+    "clear": "清除",
+    "view": "查看",
     "create": "创建",
     "creating": "创建中...",
     "update": "更新",
@@ -266,6 +269,10 @@
     "active": "已激活",
     "inactive": "未激活"
   },
+  "pagination": {
+    "rowsPerPage": "每页行数",
+    "showing": "显示第 {{from}}-{{to}} 条，共 {{total}} 条"
+  },
   "nav": {
     "dashboard": "仪表盘",
     "servers": "服务器",
@@ -275,7 +282,8 @@
     "users": "用户",
     "market": "市场",
     "cloud": "云端市场",
-    "logs": "日志"
+    "logs": "日志",
+    "activity": "活动"
   },
   "pages": {
     "dashboard": {
@@ -848,5 +856,39 @@
     "internalError": "内部错误",
     "internalErrorMessage": "处理 OAuth 回调时发生意外错误。",
     "closeWindow": "关闭窗口"
+  },
+  "activity": {
+    "title": "活动",
+    "totalCalls": "总调用次数",
+    "successCount": "成功次数",
+    "errorCount": "失败次数",
+    "avgDuration": "平均耗时",
+    "timestamp": "时间",
+    "server": "服务器",
+    "tool": "工具",
+    "duration": "耗时",
+    "status": "状态",
+    "group": "分组",
+    "key": "API密钥",
+    "input": "输入",
+    "output": "输出",
+    "details": "活动详情",
+    "errorMessage": "错误信息",
+    "searchServer": "服务器...",
+    "searchTool": "工具...",
+    "searchStatus": "状态...",
+    "searchGroup": "分组...",
+    "searchKeyName": "API密钥...",
+    "keyName": "API密钥名称",
+    "allStatus": "全部状态",
+    "statusSuccess": "成功",
+    "statusError": "失败",
+    "noData": "暂无活动数据",
+    "fetchError": "加载活动数据失败",
+    "cleanup": "清理",
+    "confirmCleanup": "确定要删除30天前的活动记录吗？",
+    "cleanupSuccess": "已删除 {{count}} 条旧记录",
+    "cleanupError": "清理旧记录失败",
+    "notAvailable": "活动跟踪功能仅在数据库模式下可用"
   }
 }

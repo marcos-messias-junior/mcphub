@@ -36,6 +36,7 @@ import {
   handleDescribeToolRequest,
   isSmartRoutingGroup,
 } from './smartRoutingService.js';
+import { getActivityLoggingService } from './activityLoggingService.js';
 
 const servers: { [sessionId: string]: Server } = {};
 
@@ -1145,24 +1146,37 @@ export const handleListToolsRequest = async (_: any, extra: any) => {
 
 export const handleCallToolRequest = async (request: any, extra: any) => {
   console.log(`Handling CallToolRequest for tool: ${JSON.stringify(request.params)}`);
+  const startTime = Date.now();
+  const activityLogger = getActivityLoggingService();
+
+  // Get request context for activity logging
+  const requestContextService = RequestContextService.getInstance();
+  const bearerKeyContext = requestContextService.getBearerKeyContext();
+  const sessionId = extra.sessionId || '';
+
+  // Extract group and key info from request context (set by SSE/HTTP handlers)
+  // Fallback to extra for backward compatibility (e.g., direct API calls)
+  const group =
+    requestContextService.getGroupContext() || extra?.group || getGroup(sessionId) || undefined;
+  const keyId = bearerKeyContext.keyId || extra?.keyId || undefined;
+  const keyName = bearerKeyContext.keyName || extra?.keyName || undefined;
+
   try {
     // Special handling for smart routing tools
     if (request.params.name === 'search_tools') {
       const { query, limit = 10 } = request.params.arguments || {};
-      const sessionId = extra.sessionId || '';
       return await handleSearchToolsRequest(query, limit, sessionId);
     }
 
     // Special handling for describe_tool (progressive disclosure mode)
     if (request.params.name === 'describe_tool') {
       const { toolName } = request.params.arguments || {};
-      const sessionId = extra.sessionId || '';
       return await handleDescribeToolRequest(toolName, sessionId);
     }
 
     // Special handling for call_tool
     if (request.params.name === 'call_tool') {
-      let { toolName } = request.params.arguments || {};
+      const { toolName } = request.params.arguments || {};
       if (!toolName) {
         throw new Error('toolName parameter is required');
       }
@@ -1241,6 +1255,21 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
         const result = await openApiClient.callTool(cleanToolName, finalArgs, passthroughHeaders);
 
         console.log(`OpenAPI tool invocation result: ${JSON.stringify(result)}`);
+
+        // Log successful activity
+        const duration = Date.now() - startTime;
+        await activityLogger.logToolCall({
+          server: targetServerInfo.name,
+          tool: cleanToolName,
+          duration,
+          status: 'success',
+          input: finalArgs,
+          output: result,
+          group,
+          keyId,
+          keyName,
+        });
+
         return {
           content: [
             {
@@ -1267,17 +1296,37 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
 
       const separator = getNameSeparator();
       const prefix = `${targetServerInfo.name}${separator}`;
-      toolName = toolName.startsWith(prefix) ? toolName.substring(prefix.length) : toolName;
+      const cleanToolName = toolName.startsWith(prefix)
+        ? toolName.substring(prefix.length)
+        : toolName;
       const result = await callToolWithReconnect(
         targetServerInfo,
         {
-          name: toolName,
+          name: cleanToolName,
           arguments: finalArgs,
         },
         targetServerInfo.options || {},
       );
 
       console.log(`Tool invocation result: ${JSON.stringify(result)}`);
+
+      // Log successful activity
+      const duration = Date.now() - startTime;
+      await activityLogger.logToolCall({
+        server: targetServerInfo.name,
+        tool: cleanToolName,
+        duration,
+        status: result.isError ? 'error' : 'success',
+        input: finalArgs,
+        output: result,
+        group,
+        keyId,
+        keyName,
+        errorMessage: result.isError
+          ? String(result.content?.[0]?.text || 'Unknown error')
+          : undefined,
+      });
+
       return result;
     }
 
@@ -1337,6 +1386,21 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
       );
 
       console.log(`OpenAPI tool invocation result: ${JSON.stringify(result)}`);
+
+      // Log successful activity
+      const duration = Date.now() - startTime;
+      await activityLogger.logToolCall({
+        server: serverInfo.name,
+        tool: cleanToolName,
+        duration,
+        status: 'success',
+        input: request.params.arguments,
+        output: result,
+        group,
+        keyId,
+        keyName,
+      });
+
       return {
         content: [
           {
@@ -1355,18 +1419,54 @@ export const handleCallToolRequest = async (request: any, extra: any) => {
 
     const separator = getNameSeparator();
     const prefix = `${serverInfo.name}${separator}`;
-    request.params.name = request.params.name.startsWith(prefix)
+    const cleanToolName = request.params.name.startsWith(prefix)
       ? request.params.name.substring(prefix.length)
       : request.params.name;
     const result = await callToolWithReconnect(
       serverInfo,
-      request.params,
+      { ...request.params, name: cleanToolName },
       serverInfo.options || {},
     );
     console.log(`Tool call result: ${JSON.stringify(result)}`);
+
+    // Log successful activity
+    const duration = Date.now() - startTime;
+    await activityLogger.logToolCall({
+      server: serverInfo.name,
+      tool: cleanToolName,
+      duration,
+      status: result.isError ? 'error' : 'success',
+      input: request.params.arguments,
+      output: result,
+      group,
+      keyId,
+      keyName,
+      errorMessage: result.isError
+        ? String(result.content?.[0]?.text || 'Unknown error')
+        : undefined,
+    });
+
     return result;
   } catch (error) {
     console.error(`Error handling CallToolRequest: ${error}`);
+
+    // Log error activity
+    const duration = Date.now() - startTime;
+    const toolName = request.params?.name || 'unknown';
+    const serverInfo = getServerByTool(toolName);
+
+    await activityLogger.logToolCall({
+      server: serverInfo?.name || 'unknown',
+      tool: toolName,
+      duration,
+      status: 'error',
+      input: request.params?.arguments,
+      group,
+      keyId,
+      keyName,
+      errorMessage: String(error),
+    });
+
     return {
       content: [
         {
