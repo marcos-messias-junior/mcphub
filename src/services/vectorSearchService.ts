@@ -16,21 +16,194 @@ const getOpenAIConfig = async () => {
 };
 
 // Constants for embedding models
-const EMBEDDING_DIMENSIONS = 1536; // OpenAI's text-embedding-3-small outputs 1536 dimensions
+const EMBEDDING_DIMENSIONS_SMALL = 1536; // OpenAI's text-embedding-3-small outputs 1536 dimensions
+const EMBEDDING_DIMENSIONS_LARGE = 3072; // OpenAI's text-embedding-3-large outputs 3072 dimensions
 const BGE_DIMENSIONS = 1024; // BAAI/bge-m3 outputs 1024 dimensions
 const FALLBACK_DIMENSIONS = 100; // Fallback implementation uses 100 dimensions
+
+// pgvector index limits (as of pgvector 0.7.0+)
+// - vector type: up to 2,000 dimensions for both HNSW and IVFFlat
+// - halfvec type: up to 4,000 dimensions (can be used for higher dimensional vectors via casting)
+// - bit type: up to 64,000 dimensions
+// HNSW is recommended as the default choice for better performance and robustness
+export const VECTOR_MAX_DIMENSIONS = 2000;
+export const HALFVEC_MAX_DIMENSIONS = 4000;
+
+/**
+ * Create an appropriate vector index based on the embedding dimensions
+ *
+ * According to Supabase/pgvector best practices:
+ * - HNSW should be the default choice due to better performance and robustness
+ * - HNSW indexes can be created immediately (unlike IVFFlat which needs data first)
+ * - For vectors > 2000 dimensions, use halfvec casting (up to 4000 dimensions)
+ *
+ * Index strategy:
+ * 1. For dimensions <= 2000: Use HNSW with vector type (best choice)
+ * 2. For dimensions 2001-4000: Use HNSW with halfvec casting
+ * 3. For dimensions > 4000: No index supported, warn user
+ *
+ * @param dataSource The TypeORM DataSource
+ * @param dimensions The embedding dimensions
+ * @param tableName The table name (default: 'vector_embeddings')
+ * @param columnName The column name (default: 'embedding')
+ * @returns Promise<{success: boolean, indexType: string | null, message: string}>
+ */
+export async function createVectorIndex(
+  dataSource: { query: (sql: string) => Promise<unknown> },
+  dimensions: number,
+  tableName: string = 'vector_embeddings',
+  columnName: string = 'embedding',
+): Promise<{ success: boolean; indexType: string | null; message: string }> {
+  const indexName = `idx_${tableName}_${columnName}`;
+
+  // Drop any existing index first
+  try {
+    await dataSource.query(`DROP INDEX IF EXISTS ${indexName};`);
+  } catch {
+    // Ignore errors when dropping non-existent index
+  }
+
+  // Strategy 1: For dimensions <= 2000, use standard HNSW (recommended default)
+  if (dimensions <= VECTOR_MAX_DIMENSIONS) {
+    try {
+      // HNSW is the recommended default - better performance and doesn't require pre-existing data
+      await dataSource.query(`
+        CREATE INDEX ${indexName}
+        ON ${tableName} USING hnsw (${columnName} vector_cosine_ops);
+      `);
+      console.log(`Created HNSW index for ${dimensions}-dimensional vectors.`);
+      return {
+        success: true,
+        indexType: 'hnsw',
+        message: `HNSW index created successfully for ${dimensions} dimensions`,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(`HNSW index creation failed: ${errorMessage}`);
+
+      // Fallback to IVFFlat if HNSW fails (e.g., older pgvector version)
+      try {
+        await dataSource.query(`
+          CREATE INDEX ${indexName}
+          ON ${tableName} USING ivfflat (${columnName} vector_cosine_ops) WITH (lists = 100);
+        `);
+        console.log(`Created IVFFlat index for ${dimensions}-dimensional vectors (fallback).`);
+        return {
+          success: true,
+          indexType: 'ivfflat',
+          message: `IVFFlat index created successfully for ${dimensions} dimensions`,
+        };
+      } catch (ivfError: unknown) {
+        const ivfErrorMessage = ivfError instanceof Error ? ivfError.message : 'Unknown error';
+        console.warn(`IVFFlat index creation also failed: ${ivfErrorMessage}`);
+        return {
+          success: false,
+          indexType: null,
+          message: `No index created: ${errorMessage}`,
+        };
+      }
+    }
+  }
+
+  // Strategy 2: For dimensions 2001-4000, use halfvec casting with HNSW
+  if (dimensions <= HALFVEC_MAX_DIMENSIONS) {
+    try {
+      // Use halfvec type casting for high-dimensional vectors (pgvector 0.7.0+)
+      await dataSource.query(`
+        CREATE INDEX ${indexName}
+        ON ${tableName} USING hnsw ((${columnName}::halfvec(${dimensions})) halfvec_cosine_ops);
+      `);
+      console.log(`Created HNSW index with halfvec casting for ${dimensions}-dimensional vectors.`);
+      return {
+        success: true,
+        indexType: 'hnsw-halfvec',
+        message: `HNSW index (halfvec) created successfully for ${dimensions} dimensions`,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isHalfvecNotSupported =
+        errorMessage.includes('halfvec') ||
+        errorMessage.includes('type does not exist') ||
+        errorMessage.includes('operator class');
+
+      if (isHalfvecNotSupported) {
+        console.warn('');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn('  ⚠️  HIGH-DIMENSIONAL EMBEDDING INDEX WARNING');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn(
+          `  Your embeddings have ${dimensions} dimensions, which requires halfvec support.`,
+        );
+        console.warn('');
+        console.warn('  pgvector dimension limits:');
+        console.warn(`  - vector type: max ${VECTOR_MAX_DIMENSIONS} dimensions`);
+        console.warn(
+          `  - halfvec type: max ${HALFVEC_MAX_DIMENSIONS} dimensions (pgvector 0.7.0+)`,
+        );
+        console.warn('');
+        console.warn('  RECOMMENDATIONS:');
+        console.warn('  1. Upgrade pgvector to >= 0.7.0 for halfvec support');
+        console.warn('  2. Or use a smaller embedding model:');
+        console.warn(
+          '     - text-embedding-3-small (1536 dimensions) instead of text-embedding-3-large',
+        );
+        console.warn('     - bge-m3 (1024 dimensions)');
+        console.warn('');
+        console.warn('  Vector search will work but may be slower without an optimized index.');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn('');
+      } else {
+        console.warn(`HNSW halfvec index creation failed: ${errorMessage}`);
+      }
+
+      return {
+        success: false,
+        indexType: null,
+        message: `No vector index created for ${dimensions} dimensions. ${errorMessage}`,
+      };
+    }
+  }
+
+  // Strategy 3: For dimensions > 4000, no index is supported
+  console.warn('');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn('  ⚠️  EMBEDDING DIMENSIONS EXCEED INDEX LIMITS');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn(`  Your embeddings have ${dimensions} dimensions, which exceeds all limits:`);
+  console.warn(`  - vector type: max ${VECTOR_MAX_DIMENSIONS} dimensions`);
+  console.warn(`  - halfvec type: max ${HALFVEC_MAX_DIMENSIONS} dimensions`);
+  console.warn('');
+  console.warn('  RECOMMENDATIONS:');
+  console.warn('  1. Use a smaller embedding model:');
+  console.warn('     - text-embedding-3-small (1536 dimensions)');
+  console.warn('     - text-embedding-3-large (3072 dimensions) with halfvec');
+  console.warn('     - bge-m3 (1024 dimensions)');
+  console.warn('  2. Or use dimensionality reduction (PCA) to reduce vector size');
+  console.warn('');
+  console.warn('  Vector search will work but will be slow without an index.');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn('');
+
+  return {
+    success: false,
+    indexType: null,
+    message: `Dimensions (${dimensions}) exceed maximum indexable limit (${HALFVEC_MAX_DIMENSIONS})`,
+  };
+}
 
 // Get dimensions for a model
 const getDimensionsForModel = (model: string): number => {
   if (model.includes('bge-m3')) {
     return BGE_DIMENSIONS;
+  } else if (model.includes('text-embedding-3-large')) {
+    return EMBEDDING_DIMENSIONS_LARGE;
   } else if (model.includes('text-embedding-3')) {
-    return EMBEDDING_DIMENSIONS;
+    return EMBEDDING_DIMENSIONS_SMALL;
   } else if (model === 'fallback' || model === 'simple-hash') {
     return FALLBACK_DIMENSIONS;
   }
-  // Default to OpenAI dimensions
-  return EMBEDDING_DIMENSIONS;
+  // Default to OpenAI small model dimensions
+  return EMBEDDING_DIMENSIONS_SMALL;
 };
 
 // Initialize the OpenAI client with smartRouting configuration
@@ -622,29 +795,16 @@ async function checkDatabaseVectorDimensions(dimensionsNeeded: number): Promise<
         await clearMismatchedVectorData(dimensionsNeeded);
       }
 
-      // Drop any existing indices first
-      await getAppDataSource().query(`DROP INDEX IF EXISTS idx_vector_embeddings_embedding;`);
-
       // Alter the column type with the new dimensions
       await getAppDataSource().query(`
         ALTER TABLE vector_embeddings 
         ALTER COLUMN embedding TYPE vector(${dimensionsNeeded});
       `);
 
-      // Create a new index with better error handling
-      try {
-        await getAppDataSource().query(`
-          CREATE INDEX idx_vector_embeddings_embedding 
-          ON vector_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-        `);
-      } catch (indexError: any) {
-        // If the index already exists (code 42P07) or there's a duplicate key constraint (code 23505),
-        // it's not a critical error as the index is already there
-        if (indexError.code === '42P07' || indexError.code === '23505') {
-          console.log('Index already exists, continuing...');
-        } else {
-          console.warn('Warning: Failed to create index, but continuing:', indexError.message);
-        }
+      // Create appropriate vector index using the helper function
+      const result = await createVectorIndex(getAppDataSource(), dimensionsNeeded);
+      if (!result.success) {
+        console.log('Continuing without optimized vector index...');
       }
 
       console.log(`Successfully configured vector dimensions to ${dimensionsNeeded}`);

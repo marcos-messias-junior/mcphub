@@ -249,6 +249,50 @@ EMBEDDING_BATCH_SIZE=100
 
   </Accordion>
 
+  <Accordion title="Embedding Model Selection">
+    Different embedding models produce different vector dimensions. Choose based on your performance and accuracy needs:
+
+    | Model | Dimensions | Index Type | Notes |
+    |-------|------------|------------|-------|
+    | `text-embedding-3-small` | 1536 | HNSW | **Recommended** - Best balance of quality and performance |
+    | `text-embedding-3-large` | 3072 | HNSW (halfvec) | Higher quality, requires pgvector ≥ 0.7.0 |
+    | `bge-m3` | 1024 | HNSW | Open-source alternative |
+
+    <Info>
+      **HNSW is the Recommended Index Type**
+      
+      MCPHub uses HNSW indexes by default because:
+      - Better query performance than IVFFlat
+      - Can be created immediately without pre-existing data
+      - More robust as data distribution changes
+    </Info>
+
+    <Warning>
+      **Vector Dimension Limits (pgvector 0.7.0+)**
+      
+      - `vector` type: up to **2,000 dimensions** (HNSW or IVFFlat)
+      - `halfvec` type: up to **4,000 dimensions** (used automatically for high-dimensional embeddings)
+      
+      For `text-embedding-3-large` (3072 dimensions):
+      - Requires pgvector ≥ 0.7.0 for halfvec support
+      - MCPHub automatically uses halfvec casting for optimal indexing
+      - Older pgvector versions will work but without index optimization
+      
+      **Recommendations:**
+      1. Upgrade to pgvector 0.7.0+ for best high-dimensional embedding support
+      2. Or use `text-embedding-3-small` (1536 dimensions) for broader compatibility
+    </Warning>
+
+    ```bash
+    # Recommended for most deployments
+    EMBEDDING_MODEL=text-embedding-3-small
+
+    # Higher quality (requires pgvector >= 0.7.0 for optimal indexing)
+    EMBEDDING_MODEL=text-embedding-3-large
+    ```
+
+  </Accordion>
+
   <Accordion title="Search Parameters">
     ```bash
     # Similarity threshold (0.0 to 1.0)
