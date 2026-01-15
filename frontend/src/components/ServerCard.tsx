@@ -253,6 +253,18 @@ const ServerCard = ({
             </h2>
             <StatusBadge status={server.status} onAuthClick={handleOAuthAuthorization} />
 
+            {/* Server type badge */}
+            {server.config?.type && (
+              <div className="flex items-center px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">
+                <span>
+                  {server.config.type === 'stdio' && t('server.typeStdio')}
+                  {server.config.type === 'sse' && t('server.typeSse')}
+                  {server.config.type === 'streamable-http' && t('server.typeStreamableHttp')}
+                  {server.config.type === 'openapi' && t('server.typeOpenapi')}
+                </span>
+              </div>
+            )}
+
             {/* Tool count display */}
             <div className="flex items-center px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-sm btn-primary">
               <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
