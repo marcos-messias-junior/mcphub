@@ -1,5 +1,3 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-
 // Mock dependencies before importing mcpService
 jest.mock('../../src/services/oauthService.js', () => ({
   initializeAllOAuthClients: jest.fn(),
@@ -103,7 +101,7 @@ jest.mock('../../src/config/index.js', () => ({
 }));
 
 // Import after mocks are set up
-import { handleListToolsRequest, handleCallToolRequest } from '../../src/services/mcpService.js';
+import * as mcpService from '../../src/services/mcpService.js';
 import { getGroup } from '../../src/services/sseService.js';
 import { handleSearchToolsRequest } from '../../src/services/smartRoutingService.js';
 
@@ -123,7 +121,7 @@ describe('MCP Service - Smart Routing with Group Support', () => {
 
   describe('handleListToolsRequest', () => {
     it('should return search_tools and call_tool for $smart group', async () => {
-      const result = await handleListToolsRequest({}, { sessionId: 'session-smart' });
+      const result = await mcpService.handleListToolsRequest({}, { sessionId: 'session-smart' });
 
       expect(result.tools).toHaveLength(2);
       expect(result.tools[0].name).toBe('search_tools');
@@ -132,7 +130,10 @@ describe('MCP Service - Smart Routing with Group Support', () => {
     });
 
     it('should return filtered tools for $smart/{group} pattern', async () => {
-      const result = await handleListToolsRequest({}, { sessionId: 'session-smart-group' });
+      const result = await mcpService.handleListToolsRequest(
+        {},
+        { sessionId: 'session-smart-group' },
+      );
 
       expect(getGroup).toHaveBeenCalledWith('session-smart-group');
       // Note: getServersInGroup is now called inside the mocked getSmartRoutingTools
@@ -144,7 +145,10 @@ describe('MCP Service - Smart Routing with Group Support', () => {
     });
 
     it('should handle $smart with empty group', async () => {
-      const result = await handleListToolsRequest({}, { sessionId: 'session-smart-empty' });
+      const result = await mcpService.handleListToolsRequest(
+        {},
+        { sessionId: 'session-smart-empty' },
+      );
 
       expect(getGroup).toHaveBeenCalledWith('session-smart-empty');
       // Note: getServersInGroup is now called inside the mocked getSmartRoutingTools
@@ -169,7 +173,7 @@ describe('MCP Service - Smart Routing with Group Support', () => {
         },
       };
 
-      await handleCallToolRequest(request, { sessionId: 'session-smart' });
+      await mcpService.handleCallToolRequest(request, { sessionId: 'session-smart' });
 
       // handleSearchToolsRequest should be called with the query, limit, and sessionId
       expect(handleSearchToolsRequest).toHaveBeenCalledWith('test query', 10, 'session-smart');
@@ -186,7 +190,7 @@ describe('MCP Service - Smart Routing with Group Support', () => {
         },
       };
 
-      await handleCallToolRequest(request, { sessionId: 'session-smart-group' });
+      await mcpService.handleCallToolRequest(request, { sessionId: 'session-smart-group' });
 
       // handleSearchToolsRequest should be called with the sessionId that contains group info
       // The group filtering happens inside handleSearchToolsRequest, not in handleCallToolRequest
@@ -208,7 +212,7 @@ describe('MCP Service - Smart Routing with Group Support', () => {
         },
       };
 
-      await handleCallToolRequest(request, { sessionId: 'session-smart-empty' });
+      await mcpService.handleCallToolRequest(request, { sessionId: 'session-smart-empty' });
 
       expect(handleSearchToolsRequest).toHaveBeenCalledWith(
         'test query',
@@ -232,10 +236,52 @@ describe('MCP Service - Smart Routing with Group Support', () => {
         },
       };
 
-      const result = await handleCallToolRequest(request, { sessionId: 'session-smart' });
+      const result = await mcpService.handleCallToolRequest(request, {
+        sessionId: 'session-smart',
+      });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Query parameter is required');
+    });
+  });
+
+  describe('handleCallToolRequest - call_tool', () => {
+    it('should not leak wrapper fields when tool arguments are empty', async () => {
+      const callTool = jest.fn().mockResolvedValue({ content: [] });
+      const serverInfo = {
+        name: 'server1',
+        status: 'connected',
+        enabled: true,
+        tools: [{ name: 'server1::pal-version' }],
+        client: { callTool },
+        options: {},
+      } as any;
+
+      const getServerByNameSpy = jest
+        .spyOn(mcpService, 'getServerByName')
+        .mockReturnValue(serverInfo);
+
+      const request = {
+        params: {
+          name: 'call_tool',
+          arguments: {
+            toolName: 'server1::pal-version',
+            arguments: {},
+          },
+        },
+      };
+
+      await mcpService.handleCallToolRequest(request, {
+        sessionId: 'session-smart',
+        server: 'server1',
+      });
+
+      expect(callTool).toHaveBeenCalledTimes(1);
+      const toolParams = callTool.mock.calls[0][0];
+      expect(toolParams).toEqual({ name: 'pal-version', arguments: {} });
+      expect(toolParams.arguments).not.toHaveProperty('toolName');
+
+      getServerByNameSpy.mockRestore();
     });
   });
 });
