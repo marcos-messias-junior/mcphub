@@ -68,7 +68,10 @@ http://localhost:3000/mcp           # Tous les serveurs
 http://localhost:3000/mcp/{group}   # Groupe spécifique
 http://localhost:3000/mcp/{server}  # Serveur spécifique
 http://localhost:3000/mcp/$smart    # Routage intelligent
+http://localhost:3000/mcp/$smart/{group}  # Routage intelligent dans un groupe
 ```
+
+> **Note de sécurité** : Les points de terminaison MCP nécessitent une authentification par défaut pour éviter toute exposition accidentelle. Pour autoriser l'accès MCP sans authentification, désactivez **Activer l'authentification Bearer** dans la section Clés. **Ignorer l'authentification** n'affecte que la connexion au tableau de bord. À utiliser uniquement dans des environnements de confiance.
 
 📖 Consultez la [Référence API](https://docs.mcphubx.com/api-reference) pour la documentation détaillée des points de terminaison.
 

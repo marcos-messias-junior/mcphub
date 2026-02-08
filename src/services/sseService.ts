@@ -166,15 +166,17 @@ const isBearerKeyAllowedForRequest = async (req: Request, key: BearerKey): Promi
 };
 
 const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
+  const systemConfigDao = getSystemConfigDao();
+  const systemConfig = await systemConfigDao.get();
+  const enableBearerAuth = systemConfig?.routing?.enableBearerAuth ?? true;
+
   const bearerKeyDao = getBearerKeyDao();
   const enabledKeys = await bearerKeyDao.findEnabled();
 
   const authHeader = req.headers.authorization;
   const hasBearerHeader = !!authHeader && authHeader.startsWith('Bearer ');
 
-  // If no enabled keys are configured, bearer auth is effectively disabled.
-  // We still allow OAuth bearer tokens to attach user context in this case.
-  if (enabledKeys.length === 0) {
+  if (!enableBearerAuth) {
     if (!hasBearerHeader) {
       return { valid: true };
     }
@@ -184,17 +186,31 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
       return { valid: true };
     }
 
+    const matchingKey = enabledKeys.find((key) => key.token === token);
+    if (matchingKey) {
+      const allowed = await isBearerKeyAllowedForRequest(req, matchingKey);
+      if (allowed) {
+        console.log(
+          `Bearer key recognized (auth disabled): id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
+        );
+        return { valid: true, keyId: matchingKey.id, keyName: matchingKey.name };
+      }
+
+      console.warn(
+        `Bearer key matched but rejected due to scope restrictions (auth disabled): id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
+      );
+      return { valid: true };
+    }
+
     const oauthUser = await resolveOAuthUserFromToken(token);
     if (oauthUser) {
-      console.log('Authenticated request using OAuth bearer token without configured keys');
+      console.log('Recognized OAuth bearer token (auth disabled)');
       return { valid: true, user: oauthUser };
     }
 
-    // When there are no keys, a non-OAuth bearer token should not block access
     return { valid: true };
   }
 
-  // When keys exist, bearer header is required
   if (!hasBearerHeader) {
     return { valid: false, reason: 'missing' };
   }
@@ -204,7 +220,19 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
     return { valid: false, reason: 'missing' };
   }
 
-  // First, try to match a configured bearer key
+  if (enabledKeys.length === 0) {
+    const oauthUser = await resolveOAuthUserFromToken(token);
+    if (oauthUser) {
+      console.log('Authenticated request using OAuth bearer token without configured keys');
+      return { valid: true, user: oauthUser };
+    }
+
+    console.warn(
+      'Bearer authentication failed: no configured keys and token is not a valid OAuth token',
+    );
+    return { valid: false, reason: 'invalid' };
+  }
+
   const matchingKey = enabledKeys.find((key) => key.token === token);
   if (matchingKey) {
     const allowed = await isBearerKeyAllowedForRequest(req, matchingKey);
@@ -221,7 +249,6 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
     return { valid: true, keyId: matchingKey.id, keyName: matchingKey.name };
   }
 
-  // Fallback: treat token as potential OAuth access token
   const oauthUser = await resolveOAuthUserFromToken(token);
   if (oauthUser) {
     console.log('Authenticated request using OAuth bearer token (no matching static key)');
@@ -353,7 +380,7 @@ export const handleSseConnection = async (req: Request, res: Response): Promise<
   const routingConfig = systemConfig?.routing || {
     enableGlobalRoute: true,
     enableGroupNameRoute: true,
-    enableBearerAuth: false,
+    enableBearerAuth: true,
     bearerAuthKey: '',
   };
   const group = req.params.group;

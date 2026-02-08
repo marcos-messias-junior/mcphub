@@ -68,7 +68,10 @@ http://localhost:3000/mcp           # All servers
 http://localhost:3000/mcp/{group}   # Specific group
 http://localhost:3000/mcp/{server}  # Specific server
 http://localhost:3000/mcp/$smart    # Smart routing
+http://localhost:3000/mcp/$smart/{group}  # Smart routing within group
 ```
+
+> **Security note**: MCP endpoints require authentication by default to prevent accidental exposure. To allow unauthenticated MCP access, disable **Enable Bearer Authentication** in the Keys section. **Skip Authentication** only affects dashboard login. Use these only in trusted environments.
 
 📖 See [API Reference](https://docs.mcphubx.com/api-reference) for detailed endpoint documentation.
 
