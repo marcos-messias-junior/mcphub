@@ -247,16 +247,15 @@ export const registerClient = async (
     // Step 2: Prepare client metadata for registration
     const metadata = dynamicConfig?.metadata || {};
 
-    // Determine scopes: priority is metadata.scope > autoDetectedScopes > configured scopes > default
-    let scopeValue: string;
+    // Determine scopes: priority is metadata.scope > autoDetectedScopes > configured scopes
+    // If no scopes are configured, omit scope entirely and let the server decide (RFC 6749 Section 3.3)
+    let scopeValue: string | undefined;
     if (metadata.scope) {
       scopeValue = metadata.scope;
     } else if (autoDetectedScopes && autoDetectedScopes.length > 0) {
       scopeValue = autoDetectedScopes.join(' ');
     } else if (serverConfig.oauth?.scopes) {
       scopeValue = serverConfig.oauth.scopes.join(' ');
-    } else {
-      scopeValue = 'read write';
     }
 
     const clientMetadata: Partial<client.ClientMetadata> = {
@@ -265,7 +264,7 @@ export const registerClient = async (
       grant_types: metadata.grant_types || ['authorization_code', 'refresh_token'],
       response_types: metadata.response_types || ['code'],
       token_endpoint_auth_method: metadata.token_endpoint_auth_method || 'client_secret_post',
-      scope: scopeValue,
+      ...(scopeValue ? { scope: scopeValue } : {}),
       ...metadata, // Include any additional custom metadata
     };
 
@@ -346,7 +345,9 @@ export const getAuthorizationUrl = async (
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      scope: serverConfig.oauth?.scopes?.join(' ') || 'read write',
+      ...(serverConfig.oauth?.scopes?.length
+        ? { scope: serverConfig.oauth.scopes.join(' ') }
+        : {}),
     };
 
     // Add resource parameter for MCP (RFC8707)
