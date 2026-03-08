@@ -247,7 +247,7 @@ export const registerClient = async (
     // Step 2: Prepare client metadata for registration
     const metadata = dynamicConfig?.metadata || {};
 
-    // Determine scopes: priority is metadata.scope > autoDetectedScopes > configured scopes > 'openid'
+    // Determine scopes: priority is metadata.scope > autoDetectedScopes > configured scopes > default
     let scopeValue: string;
     if (metadata.scope) {
       scopeValue = metadata.scope;
@@ -256,7 +256,7 @@ export const registerClient = async (
     } else if (serverConfig.oauth?.scopes) {
       scopeValue = serverConfig.oauth.scopes.join(' ');
     } else {
-      scopeValue = 'openid';
+      scopeValue = 'read write';
     }
 
     const clientMetadata: Partial<client.ClientMetadata> = {
@@ -346,7 +346,7 @@ export const getAuthorizationUrl = async (
       state,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      scope: serverConfig.oauth?.scopes?.join(' ') || 'openid',
+      scope: serverConfig.oauth?.scopes?.join(' ') || 'read write',
     };
 
     // Add resource parameter for MCP (RFC8707)

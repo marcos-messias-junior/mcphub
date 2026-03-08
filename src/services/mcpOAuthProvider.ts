@@ -171,7 +171,7 @@ export class MCPHubOAuthProvider implements OAuthClientProvider {
       grant_types: metadata.grant_types || ['authorization_code', 'refresh_token'],
       response_types: metadata.response_types || ['code'],
       token_endpoint_auth_method: tokenEndpointAuthMethod,
-      scope: metadata.scope || this.serverConfig.oauth?.scopes?.join(' ') || 'openid',
+      scope: metadata.scope || this.serverConfig.oauth?.scopes?.join(' ') || 'read write',
     };
   }
 
