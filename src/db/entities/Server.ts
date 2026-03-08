@@ -21,6 +21,9 @@ export class Server {
   type?: string; // 'stdio', 'sse', 'streamable-http', 'openapi'
 
   @Column({ type: 'text', nullable: true })
+  description?: string;
+
+  @Column({ type: 'text', nullable: true })
   url?: string;
 
   @Column({ type: 'varchar', length: 500, nullable: true })
@@ -54,10 +57,16 @@ export class Server {
   prompts?: Record<string, { enabled: boolean; description?: string }>;
 
   @Column({ type: 'simple-json', nullable: true })
+  resources?: Record<string, { enabled: boolean; description?: string }>;
+
+  @Column({ type: 'simple-json', nullable: true })
   options?: Record<string, any>;
 
   @Column({ type: 'simple-json', nullable: true })
   oauth?: Record<string, any>;
+
+  @Column({ type: 'simple-json', nullable: true })
+  proxy?: Record<string, any>;
 
   @Column({ type: 'simple-json', nullable: true })
   openapi?: Record<string, any>;

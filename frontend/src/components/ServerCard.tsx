@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, AlertCircle, Copy, Check } from 'lucide-reac
 import { StatusBadge } from '@/components/ui/Badge';
 import ToolCard from '@/components/ui/ToolCard';
 import PromptCard from '@/components/ui/PromptCard';
+import ResourceCard from '@/components/ui/ResourceCard';
 import DeleteDialog from '@/components/ui/DeleteDialog';
 import { useToast } from '@/contexts/ToastContext';
 import { useSettingsData } from '@/hooks/useSettingsData';
@@ -18,7 +19,14 @@ interface ServerCardProps {
   onReload?: (server: Server) => Promise<boolean>;
 }
 
-const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }: ServerCardProps) => {
+const ServerCard = ({
+  server,
+  onRemove,
+  onEdit,
+  onToggle,
+  onRefresh,
+  onReload,
+}: ServerCardProps) => {
   const { t } = useTranslation();
   const { showToast } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -43,6 +51,11 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
   }, []);
 
   const { exportMCPSettings } = useSettingsData();
+  const totalTools = server.tools?.length || 0;
+  const enabledTools = server.tools?.filter((tool) => tool.enabled !== false).length || 0;
+  const totalResources = server.resources?.length || 0;
+  const enabledResources =
+    server.resources?.filter((resource) => resource.enabled !== false).length || 0;
 
   const handleRemove = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -229,22 +242,74 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
     }
   };
 
+  const handleResourceToggle = async (resourceUri: string, enabled: boolean) => {
+    try {
+      const { toggleResource } = await import('@/services/resourceService');
+      const result = await toggleResource(server.name, resourceUri, enabled);
+      if (result.success) {
+        showToast(
+          t(enabled ? 'tool.enableSuccess' : 'tool.disableSuccess', { name: resourceUri }),
+          'success',
+        );
+        if (onRefresh) {
+          onRefresh();
+        }
+      } else {
+        showToast(result.error || t('tool.toggleFailed'), 'error');
+      }
+    } catch (error) {
+      console.error('Error toggling resource:', error);
+      showToast(t('tool.toggleFailed'), 'error');
+    }
+  };
+
+  const handleResourceDescriptionUpdate = async (resourceUri: string, description: string) => {
+    try {
+      const { updateResourceDescription } = await import('@/services/resourceService');
+      const result = await updateResourceDescription(server.name, resourceUri, description);
+      if (result.success) {
+        showToast(t('prompt.descriptionUpdateSuccess'), 'success');
+        if (onRefresh) {
+          onRefresh();
+        }
+      } else {
+        showToast(result.error || t('prompt.descriptionUpdateFailed'), 'error');
+      }
+    } catch (error) {
+      console.error('Error updating resource description:', error);
+      showToast(t('prompt.descriptionUpdateFailed'), 'error');
+    }
+  };
+
   return (
     <>
-      <div
-        className={`bg-white shadow rounded-lg p-6 mb-6 page-card transition-all duration-200 ${server.enabled === false ? 'opacity-60' : ''}`}
-      >
+      <div className="bg-white shadow rounded-lg mb-6 page-card transition-all duration-200">
         <div
-          className="flex justify-between items-center cursor-pointer"
+          className="flex justify-between items-center cursor-pointer p-4"
           onClick={() => setIsExpanded(!isExpanded)}
         >
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2">
             <h2
               className={`text-xl font-semibold ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'}`}
             >
               {server.name}
             </h2>
+            {server.config?.description && (
+              <span className="text-sm text-gray-500">({server.config.description})</span>
+            )}
             <StatusBadge status={server.status} onAuthClick={handleOAuthAuthorization} />
+
+            {/* Server type badge */}
+            {server.config?.type && (
+              <div className="flex items-center px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">
+                <span>
+                  {server.config.type === 'stdio' && t('server.typeStdio')}
+                  {server.config.type === 'sse' && t('server.typeSse')}
+                  {server.config.type === 'streamable-http' && t('server.typeStreamableHttp')}
+                  {server.config.type === 'openapi' && t('server.typeOpenapi')}
+                </span>
+              </div>
+            )}
 
             {/* Tool count display */}
             <div className="flex items-center px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-sm btn-primary">
@@ -256,7 +321,7 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
                 />
               </svg>
               <span>
-                {server.tools?.length || 0} {t('server.tools')}
+                {enabledTools}/{totalTools} {t('server.tools')}
               </span>
             </div>
 
@@ -268,6 +333,16 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
               </svg>
               <span>
                 {server.prompts?.length || 0} {t('server.prompts')}
+              </span>
+            </div>
+
+            {/* Resource count display */}
+            <div className="flex items-center px-2 py-1 bg-emerald-50 text-emerald-700 rounded-full text-sm btn-primary">
+              <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M4 3a2 2 0 00-2 2v8a2 2 0 002 2h3l3 2 3-2h3a2 2 0 002-2V5a2 2 0 00-2-2H4z" />
+              </svg>
+              <span>
+                {enabledResources}/{totalResources} {t('nav.resources')}
               </span>
             </div>
 
@@ -350,7 +425,7 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
                     ? 'bg-gray-200 text-gray-500'
                     : server.enabled !== false
                       ? 'bg-green-100 text-green-800 hover:bg-green-200 btn-secondary'
-                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200 btn-primary'
+                      : 'bg-blue-100 text-blue-800 hover:bg-blue-200 btn-primary'
                 }`}
                 disabled={isToggling || isReloading}
               >
@@ -361,11 +436,11 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
                     : t('server.enable')}
               </button>
             </div>
-            {server.enabled !== false && onReload && (
+            {onReload && (
               <button
                 onClick={handleReload}
                 className="px-3 py-1 bg-purple-100 text-purple-800 rounded hover:bg-purple-200 text-sm btn-secondary disabled:opacity-70 disabled:cursor-not-allowed"
-                disabled={isReloading || isToggling}
+                disabled={isReloading || isToggling || server.enabled === false}
               >
                 {isReloading ? t('common.processing') : t('server.reload')}
               </button>
@@ -385,9 +460,9 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
         {isExpanded && (
           <>
             {server.tools && (
-              <div className="mt-6">
+              <div className="px-4">
                 <h6
-                  className={`font-medium ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'} mb-4`}
+                  className={`font-medium ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'} mb-2`}
                 >
                   {t('server.tools')}
                 </h6>
@@ -405,9 +480,9 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
             )}
 
             {server.prompts && (
-              <div className="mt-6">
+              <div className="px-4 pb-2">
                 <h6
-                  className={`font-medium ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'} mb-4`}
+                  className={`font-medium ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'}`}
                 >
                   {t('server.prompts')}
                 </h6>
@@ -421,6 +496,32 @@ const ServerCard = ({ server, onRemove, onEdit, onToggle, onRefresh, onReload }:
                     />
                   ))}
                 </div>
+              </div>
+            )}
+
+            {server.resources && (
+              <div className="px-4 pb-2">
+                <h6
+                  className={`font-medium ${server.enabled === false ? 'text-gray-600' : 'text-gray-900'}`}
+                >
+                  {t('nav.resources')}
+                </h6>
+                {server.resources.length === 0 ? (
+                  <div className="text-sm text-gray-500 py-2">
+                    {t('builtinResources.noResources')}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {server.resources.map((resource, index) => (
+                      <ResourceCard
+                        key={`${resource.uri}-${index}`}
+                        resource={resource}
+                        onToggle={handleResourceToggle}
+                        onDescriptionUpdate={handleResourceDescriptionUpdate}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </>

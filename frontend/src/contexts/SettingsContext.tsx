@@ -30,9 +30,16 @@ interface InstallConfig {
 interface SmartRoutingConfig {
   enabled: boolean;
   dbUrl: string;
+  embeddingProvider?: 'openai' | 'azure_openai';
+  embeddingEncodingFormat?: 'auto' | 'base64' | 'float';
   openaiApiBaseUrl: string;
   openaiApiKey: string;
   openaiApiEmbeddingModel: string;
+  azureOpenaiEndpoint?: string;
+  azureOpenaiApiKey?: string;
+  azureOpenaiApiVersion?: string;
+  azureOpenaiEmbeddingDeployment?: string;
+  progressiveDisclosure: boolean;
 }
 
 interface MCPRouterConfig {
@@ -159,7 +166,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
   const [routingConfig, setRoutingConfig] = useState<RoutingConfig>({
     enableGlobalRoute: true,
     enableGroupNameRoute: true,
-    enableBearerAuth: false,
+    enableBearerAuth: true,
     bearerAuthKey: '',
     skipAuth: false,
   });
@@ -177,9 +184,16 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
   const [smartRoutingConfig, setSmartRoutingConfig] = useState<SmartRoutingConfig>({
     enabled: false,
     dbUrl: '',
+    embeddingProvider: 'openai',
+    embeddingEncodingFormat: 'auto',
     openaiApiBaseUrl: '',
     openaiApiKey: '',
     openaiApiEmbeddingModel: '',
+    azureOpenaiEndpoint: '',
+    azureOpenaiApiKey: '',
+    azureOpenaiApiVersion: '',
+    azureOpenaiEmbeddingDeployment: '',
+    progressiveDisclosure: false,
   });
 
   const [mcpRouterConfig, setMCPRouterConfig] = useState<MCPRouterConfig>({
@@ -218,7 +232,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
         setRoutingConfig({
           enableGlobalRoute: data.data.systemConfig.routing.enableGlobalRoute ?? true,
           enableGroupNameRoute: data.data.systemConfig.routing.enableGroupNameRoute ?? true,
-          enableBearerAuth: data.data.systemConfig.routing.enableBearerAuth ?? false,
+          enableBearerAuth: data.data.systemConfig.routing.enableBearerAuth ?? true,
           bearerAuthKey: data.data.systemConfig.routing.bearerAuthKey || '',
           skipAuth: data.data.systemConfig.routing.skipAuth ?? false,
         });
@@ -234,10 +248,26 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
         setSmartRoutingConfig({
           enabled: data.data.systemConfig.smartRouting.enabled ?? false,
           dbUrl: data.data.systemConfig.smartRouting.dbUrl || '',
+          embeddingProvider:
+            data.data.systemConfig.smartRouting.embeddingProvider === 'azure_openai'
+              ? 'azure_openai'
+              : 'openai',
+          embeddingEncodingFormat:
+            data.data.systemConfig.smartRouting.embeddingEncodingFormat === 'base64'
+              ? 'base64'
+              : data.data.systemConfig.smartRouting.embeddingEncodingFormat === 'float'
+                ? 'float'
+                : 'auto',
           openaiApiBaseUrl: data.data.systemConfig.smartRouting.openaiApiBaseUrl || '',
           openaiApiKey: data.data.systemConfig.smartRouting.openaiApiKey || '',
           openaiApiEmbeddingModel:
             data.data.systemConfig.smartRouting.openaiApiEmbeddingModel || '',
+          azureOpenaiEndpoint: data.data.systemConfig.smartRouting.azureOpenaiEndpoint || '',
+          azureOpenaiApiKey: data.data.systemConfig.smartRouting.azureOpenaiApiKey || '',
+          azureOpenaiApiVersion: data.data.systemConfig.smartRouting.azureOpenaiApiVersion || '',
+          azureOpenaiEmbeddingDeployment:
+            data.data.systemConfig.smartRouting.azureOpenaiEmbeddingDeployment || '',
+          progressiveDisclosure: data.data.systemConfig.smartRouting.progressiveDisclosure ?? false,
         });
       }
       if (data.success && data.data?.systemConfig?.mcpRouter) {

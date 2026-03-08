@@ -18,6 +18,7 @@ MCPHub makes it easy to manage and scale multiple MCP (Model Context Protocol) s
 - **Smart Routing** - AI-powered tool discovery using vector semantic search ([Learn more](https://docs.mcphubx.com/features/smart-routing))
 - **Hot-Swappable Config** - Add, remove, or update servers without downtime
 - **OAuth 2.0 Support** - Both client and server modes for secure authentication ([Learn more](https://docs.mcphubx.com/features/oauth))
+- **Social Login** - Seamless GitHub and Google login support with Better Auth integration (requires Database Mode)
 - **Database Mode** - Store configuration in PostgreSQL for production environments ([Learn more](https://docs.mcphubx.com/configuration/database-configuration))
 - **Docker-Ready** - Deploy instantly with containerized setup
 
@@ -67,7 +68,10 @@ http://localhost:3000/mcp           # All servers
 http://localhost:3000/mcp/{group}   # Specific group
 http://localhost:3000/mcp/{server}  # Specific server
 http://localhost:3000/mcp/$smart    # Smart routing
+http://localhost:3000/mcp/$smart/{group}  # Smart routing within group
 ```
+
+> **Security note**: MCP endpoints require authentication by default to prevent accidental exposure. To allow unauthenticated MCP access, disable **Enable Bearer Authentication** in the Keys section. **Skip Authentication** only affects dashboard login. Use these only in trusted environments.
 
 📖 See [API Reference](https://docs.mcphubx.com/api-reference) for detailed endpoint documentation.
 

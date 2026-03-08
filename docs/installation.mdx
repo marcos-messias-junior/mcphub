@@ -14,7 +14,7 @@ Before installing MCPHub, ensure you have the following prerequisites:
 Optional for Smart Routing:
 
 - **PostgreSQL** with pgvector extension
-- **OpenAI API Key** or compatible embedding service
+- **LLM Provider (OpenAI or compatible) API Key**
 
 ## Installation Methods
 
@@ -394,7 +394,7 @@ Smart Routing provides AI-powered tool discovery using vector semantic search.
 ### Prerequisites
 
 1. **PostgreSQL with pgvector**
-2. **OpenAI API Key** (or compatible embedding service)
+2. **LLM Provider (OpenAI or compatible) API Key**
 
 ### Database Setup
 
@@ -445,7 +445,7 @@ Set the following environment variables:
 
 ```bash
 # Database connection
-DATABASE_URL=postgresql://mcphub:your_password@localhost:5432/mcphub
+DB_URL=postgresql://mcphub:your_password@localhost:5432/mcphub
 
 # OpenAI API for embeddings
 OPENAI_API_KEY=your_openai_api_key
@@ -563,14 +563,14 @@ curl -X POST http://localhost:3000/mcp \
     **Database connection failed:**
     ```bash
     # Test database connection
-    psql $DATABASE_URL -c "SELECT 1;"
+    psql $DB_URL -c "SELECT 1;"
 
     # Check if pgvector is installed
-    psql $DATABASE_URL -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    psql $DB_URL -c "CREATE EXTENSION IF NOT EXISTS vector;"
     ```
 
     **Embedding service errors:**
-    - Verify OpenAI API key is valid
+    - Verify LLM provider API key is valid
     - Check internet connectivity
     - Monitor rate limits
 

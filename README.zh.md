@@ -18,6 +18,7 @@ MCPHub 通过将多个 MCP（Model Context Protocol）服务器组织为灵活�
 - **智能路由** - 基于向量语义搜索的 AI 工具发现 ([了解更多](https://docs.mcphubx.com/zh/features/smart-routing))
 - **热插拔配置** - 无需停机即可添加、移除或更新服务器
 - **OAuth 2.0 支持** - 客户端和服务端模式，实现安全认证 ([了解更多](https://docs.mcphubx.com/zh/features/oauth))
+- **社交一键登录** - 通过 Better Auth 集成支持 GitHub 和 Google 快捷登录（需启用数据库模式）
 - **数据库模式** - 将配置存储在 PostgreSQL 中，适用于生产环境 ([了解更多](https://docs.mcphubx.com/zh/configuration/database-configuration))
 - **Docker 就绪** - 容器化部署，开箱即用
 
@@ -67,7 +68,10 @@ http://localhost:3000/mcp           # 所有服务器
 http://localhost:3000/mcp/{group}   # 特定分组
 http://localhost:3000/mcp/{server}  # 特定服务器
 http://localhost:3000/mcp/$smart    # 智能路由
+http://localhost:3000/mcp/$smart/{group}  # 智能路由（特定分组）
 ```
+
+> **安全提示**：MCP 端点默认需要身份验证，以避免意外暴露。若需对 MCP 端点开放匿名访问，请在密钥设置中关闭 **启用 Bearer 认证**。**免登录开关**仅影响仪表盘登录。仅建议在受信任环境中使用。
 
 📖 查看 [API 参考](https://docs.mcphubx.com/zh/api-reference)了解详细的端点文档。
 

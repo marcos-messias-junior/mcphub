@@ -2,8 +2,10 @@ import { getRepositoryFactory } from '../db/index.js';
 import { VectorEmbeddingRepository } from '../db/repositories/index.js';
 import { Tool } from '../types/index.js';
 import { getAppDataSource, isDatabaseConnected, initializeDatabase } from '../db/connection.js';
-import { getSmartRoutingConfig } from '../utils/smartRouting.js';
+import { getSmartRoutingConfig, type SmartRoutingConfig } from '../utils/smartRouting.js';
+import { toFloat32Array } from '../utils/base64.js';
 import OpenAI from 'openai';
+import axios from 'axios';
 
 // Get OpenAI configuration from smartRouting settings or fallback to environment variables
 const getOpenAIConfig = async () => {
@@ -15,22 +17,262 @@ const getOpenAIConfig = async () => {
   };
 };
 
+const getAzureOpenAIConfig = (smartRoutingConfig: SmartRoutingConfig) => {
+  return {
+    endpoint: smartRoutingConfig.azureOpenaiEndpoint,
+    apiKey: smartRoutingConfig.azureOpenaiApiKey,
+    apiVersion: smartRoutingConfig.azureOpenaiApiVersion,
+    embeddingDeployment: smartRoutingConfig.azureOpenaiEmbeddingDeployment,
+  };
+};
+
+const generateAzureOpenAIEmbedding = async (
+  text: string,
+  smartRoutingConfig: SmartRoutingConfig,
+): Promise<number[]> => {
+  const azureConfig = getAzureOpenAIConfig(smartRoutingConfig);
+
+  if (!azureConfig.endpoint || !azureConfig.apiKey) {
+    throw new Error('Azure OpenAI endpoint/apiKey is not configured');
+  }
+
+  if (!azureConfig.apiVersion) {
+    throw new Error('Azure OpenAI apiVersion is not configured');
+  }
+
+  if (!azureConfig.embeddingDeployment) {
+    throw new Error('Azure OpenAI embedding deployment is not configured');
+  }
+
+  const endpoint = azureConfig.endpoint.replace(/\/+$/, '');
+  const url = `${endpoint}/openai/deployments/${encodeURIComponent(
+    azureConfig.embeddingDeployment,
+  )}/embeddings?api-version=${encodeURIComponent(azureConfig.apiVersion)}`;
+
+  const response = await axios.post(
+    url,
+    {
+      input: text,
+    },
+    {
+      headers: {
+        'api-key': azureConfig.apiKey,
+        'Content-Type': 'application/json',
+      },
+    },
+  );
+
+  const embedding = response?.data?.data?.[0]?.embedding;
+  if (!Array.isArray(embedding)) {
+    throw new Error('Azure embeddings response missing embedding data');
+  }
+
+  return embedding;
+};
+
 // Constants for embedding models
-const EMBEDDING_DIMENSIONS = 1536; // OpenAI's text-embedding-3-small outputs 1536 dimensions
+const EMBEDDING_DIMENSIONS_SMALL = 1536; // OpenAI's text-embedding-3-small outputs 1536 dimensions
+const EMBEDDING_DIMENSIONS_LARGE = 3072; // OpenAI's text-embedding-3-large outputs 3072 dimensions
 const BGE_DIMENSIONS = 1024; // BAAI/bge-m3 outputs 1024 dimensions
+const GEMINI_EMBEDDING_DIMENSIONS = 3072; // Google Gemini gemini-embedding-001 default output dimensions
 const FALLBACK_DIMENSIONS = 100; // Fallback implementation uses 100 dimensions
+
+// List of base URLs that support base64 embeddings
+const BASE64_EMBEDDING_SUPPORTED_PROVIDERS = [
+  'https://api.openai.com',
+  'https://api.siliconflow.cn',
+  'https://openrouter.ai',
+];
+
+// pgvector index limits (as of pgvector 0.7.0+)
+// - vector type: up to 2,000 dimensions for both HNSW and IVFFlat
+// - halfvec type: up to 4,000 dimensions (can be used for higher dimensional vectors via casting)
+// - bit type: up to 64,000 dimensions
+// HNSW is recommended as the default choice for better performance and robustness
+export const VECTOR_MAX_DIMENSIONS = 2000;
+export const HALFVEC_MAX_DIMENSIONS = 4000;
+
+/**
+ * Create an appropriate vector index based on the embedding dimensions
+ *
+ * According to Supabase/pgvector best practices:
+ * - HNSW should be the default choice due to better performance and robustness
+ * - HNSW indexes can be created immediately (unlike IVFFlat which needs data first)
+ * - For vectors > 2000 dimensions, use halfvec casting (up to 4000 dimensions)
+ *
+ * Index strategy:
+ * 1. For dimensions <= 2000: Use HNSW with vector type (best choice)
+ * 2. For dimensions 2001-4000: Use HNSW with halfvec casting
+ * 3. For dimensions > 4000: No index supported, warn user
+ *
+ * @param dataSource The TypeORM DataSource
+ * @param dimensions The embedding dimensions
+ * @param tableName The table name (default: 'vector_embeddings')
+ * @param columnName The column name (default: 'embedding')
+ * @returns Promise<{success: boolean, indexType: string | null, message: string}>
+ */
+export async function createVectorIndex(
+  dataSource: { query: (sql: string) => Promise<unknown> },
+  dimensions: number,
+  tableName: string = 'vector_embeddings',
+  columnName: string = 'embedding',
+): Promise<{ success: boolean; indexType: string | null; message: string }> {
+  const indexName = `idx_${tableName}_${columnName}`;
+
+  // Drop any existing index first
+  try {
+    await dataSource.query(`DROP INDEX IF EXISTS ${indexName};`);
+  } catch {
+    // Ignore errors when dropping non-existent index
+  }
+
+  // Strategy 1: For dimensions <= 2000, use standard HNSW (recommended default)
+  if (dimensions <= VECTOR_MAX_DIMENSIONS) {
+    try {
+      // HNSW is the recommended default - better performance and doesn't require pre-existing data
+      await dataSource.query(`
+        CREATE INDEX ${indexName}
+        ON ${tableName} USING hnsw (${columnName} vector_cosine_ops);
+      `);
+      console.log(`Created HNSW index for ${dimensions}-dimensional vectors.`);
+      return {
+        success: true,
+        indexType: 'hnsw',
+        message: `HNSW index created successfully for ${dimensions} dimensions`,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(`HNSW index creation failed: ${errorMessage}`);
+
+      // Fallback to IVFFlat if HNSW fails (e.g., older pgvector version)
+      try {
+        await dataSource.query(`
+          CREATE INDEX ${indexName}
+          ON ${tableName} USING ivfflat (${columnName} vector_cosine_ops) WITH (lists = 100);
+        `);
+        console.log(`Created IVFFlat index for ${dimensions}-dimensional vectors (fallback).`);
+        return {
+          success: true,
+          indexType: 'ivfflat',
+          message: `IVFFlat index created successfully for ${dimensions} dimensions`,
+        };
+      } catch (ivfError: unknown) {
+        const ivfErrorMessage = ivfError instanceof Error ? ivfError.message : 'Unknown error';
+        console.warn(`IVFFlat index creation also failed: ${ivfErrorMessage}`);
+        return {
+          success: false,
+          indexType: null,
+          message: `No index created: ${errorMessage}`,
+        };
+      }
+    }
+  }
+
+  // Strategy 2: For dimensions 2001-4000, use halfvec casting with HNSW
+  if (dimensions <= HALFVEC_MAX_DIMENSIONS) {
+    try {
+      // Use halfvec type casting for high-dimensional vectors (pgvector 0.7.0+)
+      await dataSource.query(`
+        CREATE INDEX ${indexName}
+        ON ${tableName} USING hnsw ((${columnName}::halfvec(${dimensions})) halfvec_cosine_ops);
+      `);
+      console.log(`Created HNSW index with halfvec casting for ${dimensions}-dimensional vectors.`);
+      return {
+        success: true,
+        indexType: 'hnsw-halfvec',
+        message: `HNSW index (halfvec) created successfully for ${dimensions} dimensions`,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isHalfvecNotSupported =
+        errorMessage.includes('halfvec') ||
+        errorMessage.includes('type does not exist') ||
+        errorMessage.includes('operator class');
+
+      if (isHalfvecNotSupported) {
+        console.warn('');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn('  ⚠️  HIGH-DIMENSIONAL EMBEDDING INDEX WARNING');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn(
+          `  Your embeddings have ${dimensions} dimensions, which requires halfvec support.`,
+        );
+        console.warn('');
+        console.warn('  pgvector dimension limits:');
+        console.warn(`  - vector type: max ${VECTOR_MAX_DIMENSIONS} dimensions`);
+        console.warn(
+          `  - halfvec type: max ${HALFVEC_MAX_DIMENSIONS} dimensions (pgvector 0.7.0+)`,
+        );
+        console.warn('');
+        console.warn('  RECOMMENDATIONS:');
+        console.warn('  1. Upgrade pgvector to >= 0.7.0 for halfvec support');
+        console.warn('  2. Or use a smaller embedding model:');
+        console.warn(
+          '     - text-embedding-3-small (1536 dimensions) instead of text-embedding-3-large',
+        );
+        console.warn('     - bge-m3 (1024 dimensions)');
+        console.warn('');
+        console.warn('  Vector search will work but may be slower without an optimized index.');
+        console.warn('═══════════════════════════════════════════════════════════════════════════');
+        console.warn('');
+      } else {
+        console.warn(`HNSW halfvec index creation failed: ${errorMessage}`);
+      }
+
+      return {
+        success: false,
+        indexType: null,
+        message: `No vector index created for ${dimensions} dimensions. ${errorMessage}`,
+      };
+    }
+  }
+
+  // Strategy 3: For dimensions > 4000, no index is supported
+  console.warn('');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn('  ⚠️  EMBEDDING DIMENSIONS EXCEED INDEX LIMITS');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn(`  Your embeddings have ${dimensions} dimensions, which exceeds all limits:`);
+  console.warn(`  - vector type: max ${VECTOR_MAX_DIMENSIONS} dimensions`);
+  console.warn(`  - halfvec type: max ${HALFVEC_MAX_DIMENSIONS} dimensions`);
+  console.warn('');
+  console.warn('  RECOMMENDATIONS:');
+  console.warn('  1. Use a smaller embedding model:');
+  console.warn('     - text-embedding-3-small (1536 dimensions)');
+  console.warn('     - text-embedding-3-large (3072 dimensions) with halfvec');
+  console.warn('     - bge-m3 (1024 dimensions)');
+  console.warn('  2. Or use dimensionality reduction (PCA) to reduce vector size');
+  console.warn('');
+  console.warn('  Vector search will work but will be slow without an index.');
+  console.warn('═══════════════════════════════════════════════════════════════════════════');
+  console.warn('');
+
+  return {
+    success: false,
+    indexType: null,
+    message: `Dimensions (${dimensions}) exceed maximum indexable limit (${HALFVEC_MAX_DIMENSIONS})`,
+  };
+}
 
 // Get dimensions for a model
 const getDimensionsForModel = (model: string): number => {
+  model = model.toLowerCase();
   if (model.includes('bge-m3')) {
     return BGE_DIMENSIONS;
+  } else if (model.includes('text-embedding-3-large')) {
+    return EMBEDDING_DIMENSIONS_LARGE;
   } else if (model.includes('text-embedding-3')) {
-    return EMBEDDING_DIMENSIONS;
+    return EMBEDDING_DIMENSIONS_SMALL;
+  } else if (model.includes('gemini-embedding-001')) {
+    // Google Gemini gemini-embedding-001 defaults to 3072 dimensions.
+    // Future implementation improvements may allow configurable dimensions
+    // for Gemini models, but for now we will assume the default.
+    return GEMINI_EMBEDDING_DIMENSIONS;
   } else if (model === 'fallback' || model === 'simple-hash') {
     return FALLBACK_DIMENSIONS;
   }
-  // Default to OpenAI dimensions
-  return EMBEDDING_DIMENSIONS;
+  // Default to OpenAI small model dimensions
+  return EMBEDDING_DIMENSIONS_SMALL;
 };
 
 // Initialize the OpenAI client with smartRouting configuration
@@ -40,6 +282,11 @@ const getOpenAIClient = async () => {
     apiKey: config.apiKey, // Get API key from smartRouting settings or environment variables
     baseURL: config.baseURL, // Get base URL from smartRouting settings or fallback to default
   });
+};
+
+// Check if the provider supports base64 embeddings
+const supportBase64Embeddings = async (baseURL: string = ''): Promise<boolean> => {
+  return !baseURL || BASE64_EMBEDDING_SUPPORTED_PROVIDERS.some((url) => baseURL.startsWith(url));
 };
 
 /**
@@ -53,6 +300,39 @@ const getOpenAIClient = async () => {
  * @returns Promise with vector embedding as number array
  */
 async function generateEmbedding(text: string): Promise<number[]> {
+  const smartRoutingConfig = await getSmartRoutingConfig();
+  const provider = smartRoutingConfig.embeddingProvider || 'openai';
+
+  // Normalize whitespace before generating the embedding (issue #639):
+  // tool descriptions fetched from MCP servers can contain raw newline characters
+  // and other whitespace that introduce noise into the vector representation,
+  // potentially affecting the quality of semantic search results.
+  text = text.replace(/\s+/g, ' ').trim();
+
+  if (provider === 'azure_openai') {
+    const azureConfig = getAzureOpenAIConfig(smartRoutingConfig);
+
+    if (!azureConfig.endpoint || !azureConfig.apiKey) {
+      console.warn('Azure OpenAI endpoint/key not configured. Using fallback embedding method.');
+      return generateFallbackEmbedding(text);
+    }
+
+    try {
+      return await generateAzureOpenAIEmbedding(text, smartRoutingConfig);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `Azure OpenAI embeddings request failed (status=${status ?? 'unknown'}). Falling back to local embeddings.`,
+      );
+      console.warn(
+        `Azure embedding config: endpoint=${azureConfig.endpoint || 'missing'}, deployment=${azureConfig.embeddingDeployment || 'missing'}, apiVersion=${azureConfig.apiVersion || 'missing'}`,
+      );
+      console.warn(`Embedding error: ${message}`);
+      return generateFallbackEmbedding(text);
+    }
+  }
+
   const config = await getOpenAIConfig();
   const openai = await getOpenAIClient();
 
@@ -65,14 +345,45 @@ async function generateEmbedding(text: string): Promise<number[]> {
   // Truncate text if it's too long (OpenAI has token limits)
   const truncatedText = text.length > 8000 ? text.substring(0, 8000) : text;
 
-  // Call OpenAI's embeddings API
-  const response = await openai.embeddings.create({
-    model: config.embeddingModel, // Modern model with better performance
-    input: truncatedText,
-  });
+  // Determine encoding format based on configuration
+  const encodingFormatSetting = smartRoutingConfig.embeddingEncodingFormat || 'auto';
+  let encodingFormat: 'base64' | 'float';
+  if (encodingFormatSetting === 'auto') {
+    const canUseBase64 = await supportBase64Embeddings(config.baseURL);
+    encodingFormat = canUseBase64 ? 'base64' : 'float';
+  } else {
+    encodingFormat = encodingFormatSetting;
+  }
 
-  // Return the embedding
-  return response.data[0].embedding;
+  try {
+    // Call OpenAI's embeddings API
+    const response = await openai.embeddings.create({
+      model: config.embeddingModel, // Modern model with better performance
+      encoding_format: encodingFormat,
+      input: truncatedText,
+    });
+
+    if (encodingFormat === 'base64' && typeof response.data[0].embedding === 'string') {
+      const embeddingBase64Str = response.data[0].embedding as unknown as string;
+      return toFloat32Array(embeddingBase64Str);
+    }
+
+    // Return the embedding
+    return response.data[0].embedding;
+  } catch (error: any) {
+    const status = error?.status ?? error?.response?.status;
+    const message = error instanceof Error ? error.message : String(error);
+
+    console.warn(
+      `OpenAI embeddings request failed (status=${status ?? 'unknown'}). Falling back to local embeddings.`,
+    );
+    console.warn(
+      `Embedding config: baseURL=${config.baseURL || 'default'}, model=${config.embeddingModel || 'default'}`,
+    );
+    console.warn(`Embedding error: ${message}`);
+
+    return generateFallbackEmbedding(text);
+  }
 }
 
 /**
@@ -251,7 +562,7 @@ export const saveToolsAsVectorEmbeddings = async (
 
     console.log(`Saved ${tools.length} tool embeddings for server: ${serverName}`);
   } catch (error) {
-    console.error(`Error saving tool embeddings for server ${serverName}:${error}`);
+    console.error(`Error saving tool embeddings for server ${serverName}:`, error);
   }
 };
 
@@ -471,13 +782,24 @@ export const getAllVectorizedTools = async (
  */
 export const removeServerToolEmbeddings = async (serverName: string): Promise<void> => {
   try {
-    const _vectorRepository = getRepositoryFactory(
+    const smartRoutingConfig = await getSmartRoutingConfig();
+    if (!smartRoutingConfig.dbUrl && !process.env.DB_URL) {
+      console.warn(`Skipping embedding cleanup for ${serverName}: DB URL not configured`);
+      return;
+    }
+
+    // Ensure database is initialized before using repository
+    if (!isDatabaseConnected()) {
+      console.info('Database not initialized, initializing...');
+      await initializeDatabase();
+    }
+
+    const vectorRepository = getRepositoryFactory(
       'vectorEmbeddings',
     )() as VectorEmbeddingRepository;
 
-    // Note: This would require adding a delete method to VectorEmbeddingRepository
-    // For now, we'll log that this functionality needs to be implemented
-    console.log(`TODO: Remove tool embeddings for server: ${serverName}`);
+    const removedCount = await vectorRepository.deleteByServerName(serverName);
+    console.log(`Removed ${removedCount} tool embeddings for server: ${serverName}`);
   } catch (error) {
     console.error(`Error removing tool embeddings for server ${serverName}:`, error);
   }
@@ -622,29 +944,35 @@ async function checkDatabaseVectorDimensions(dimensionsNeeded: number): Promise<
         await clearMismatchedVectorData(dimensionsNeeded);
       }
 
-      // Drop any existing indices first
-      await getAppDataSource().query(`DROP INDEX IF EXISTS idx_vector_embeddings_embedding;`);
+      // Drop any existing index BEFORE altering the column type.
+      // This is required because PostgreSQL attempts to rebuild the index
+      // automatically during ALTER COLUMN, which fails when the new dimensions
+      // exceed the vector type HNSW limit (2000). For example, switching from
+      // 100-dimensional (fallback) to 3072-dimensional (gemini-embedding-001 or
+      // text-embedding-3-large) vectors would trigger error code 54000 from
+      // hnswbuild.c without this pre-emptive drop.
+      try {
+        await getAppDataSource().query(
+          `DROP INDEX IF EXISTS idx_vector_embeddings_embedding;`,
+        );
+      } catch (dropError: any) {
+        console.warn('Could not drop existing vector index before ALTER:', dropError?.message);
+      }
 
       // Alter the column type with the new dimensions
+      // Use halfvec for dimensions > 2000, vector otherwise
+      const vectorType = dimensionsNeeded <= VECTOR_MAX_DIMENSIONS ? 'vector' : 'halfvec';
+      console.log(`Using ${vectorType} type for ${dimensionsNeeded} dimensions`);
+
       await getAppDataSource().query(`
         ALTER TABLE vector_embeddings 
-        ALTER COLUMN embedding TYPE vector(${dimensionsNeeded});
+        ALTER COLUMN embedding TYPE ${vectorType}(${dimensionsNeeded});
       `);
 
-      // Create a new index with better error handling
-      try {
-        await getAppDataSource().query(`
-          CREATE INDEX idx_vector_embeddings_embedding 
-          ON vector_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-        `);
-      } catch (indexError: any) {
-        // If the index already exists (code 42P07) or there's a duplicate key constraint (code 23505),
-        // it's not a critical error as the index is already there
-        if (indexError.code === '42P07' || indexError.code === '23505') {
-          console.log('Index already exists, continuing...');
-        } else {
-          console.warn('Warning: Failed to create index, but continuing:', indexError.message);
-        }
+      // Create appropriate vector index using the helper function
+      const result = await createVectorIndex(getAppDataSource(), dimensionsNeeded);
+      if (!result.success) {
+        console.log('Continuing without optimized vector index...');
       }
 
       console.log(`Successfully configured vector dimensions to ${dimensionsNeeded}`);

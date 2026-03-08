@@ -69,7 +69,7 @@ Smart Routing requires additional setup compared to basic MCPHub usage:
         ports:
           - "3000:3000"
         environment:
-          - DATABASE_URL=postgresql://mcphub:password@postgres:5432/mcphub
+          - DB_URL=postgresql://mcphub:password@postgres:5432/mcphub
           - OPENAI_API_KEY=your_openai_api_key
           - ENABLE_SMART_ROUTING=true
         depends_on:
@@ -114,7 +114,7 @@ Smart Routing requires additional setup compared to basic MCPHub usage:
 
     2. **Set Environment Variables**:
     ```bash
-    export DATABASE_URL="postgresql://mcphub:your_password@localhost:5432/mcphub"
+    export DB_URL="postgresql://mcphub:your_password@localhost:5432/mcphub"
     export OPENAI_API_KEY="your_openai_api_key"
     export ENABLE_SMART_ROUTING="true"
     ```
@@ -178,7 +178,7 @@ Smart Routing requires additional setup compared to basic MCPHub usage:
           - name: mcphub
             image: samanhappy/mcphub:latest
             env:
-            - name: DATABASE_URL
+            - name: DB_URL
               value: "postgresql://mcphub:password@postgres:5432/mcphub"
             - name: OPENAI_API_KEY
               valueFrom:
@@ -202,7 +202,7 @@ Configure Smart Routing with these environment variables:
 
 ```bash
 # Required
-DATABASE_URL=postgresql://user:password@host:5432/database
+DB_URL=postgresql://user:password@host:5432/database
 OPENAI_API_KEY=your_openai_api_key
 
 # Optional
@@ -219,10 +219,10 @@ EMBEDDING_BATCH_SIZE=100
   <Accordion title="Database Configuration">
     ```bash
     # Full PostgreSQL connection string
-    DATABASE_URL=postgresql://username:password@host:port/database?schema=public
+    DB_URL=postgresql://username:password@host:port/database?schema=public
 
     # SSL configuration for cloud databases
-    DATABASE_URL=postgresql://user:pass@host:5432/db?sslmode=require
+    DB_URL=postgresql://user:pass@host:5432/db?sslmode=require
 
     # Connection pool settings
     DATABASE_POOL_SIZE=20
@@ -246,6 +246,67 @@ EMBEDDING_BATCH_SIZE=100
     EMBEDDING_SERVICE_URL=https://your-embedding-service.com
     EMBEDDING_SERVICE_API_KEY=your-api-key
     ```
+
+  </Accordion>
+
+  <Accordion title="Embedding Model Selection">
+    Different embedding models produce different vector dimensions. Choose based on your performance and accuracy needs:
+
+    | Model | Dimensions | Index Type | Notes |
+    |-------|------------|------------|-------|
+    | `text-embedding-3-small` | 1536 | HNSW | **Recommended** - Best balance of quality and performance |
+    | `text-embedding-3-large` | 3072 | HNSW (halfvec) | Higher quality, requires pgvector ≥ 0.7.0 |
+    | `bge-m3` | 1024 | HNSW | Open-source alternative |
+    | `gemini-embedding-001` | 3072 | HNSW (halfvec) | Google Gemini — free tier (100 RPM), OpenAI-compatible endpoint, requires pgvector ≥ 0.7.0 |
+
+    <Info>
+      **HNSW is the Recommended Index Type**
+      
+      MCPHub uses HNSW indexes by default because:
+      - Better query performance than IVFFlat
+      - Can be created immediately without pre-existing data
+      - More robust as data distribution changes
+    </Info>
+
+    <Warning>
+      **Vector Dimension Limits (pgvector 0.7.0+)**
+      
+      - `vector` type: up to **2,000 dimensions** (HNSW or IVFFlat)
+      - `halfvec` type: up to **4,000 dimensions** (used automatically for high-dimensional embeddings)
+      
+      For models with 3072 dimensions (`text-embedding-3-large`, `gemini-embedding-001`):
+      - Requires pgvector ≥ 0.7.0 for halfvec support
+      - MCPHub automatically uses halfvec casting for optimal indexing
+      - Older pgvector versions will work but without index optimization
+      
+      **Recommendations:**
+      1. Upgrade to pgvector 0.7.0+ for best high-dimensional embedding support
+      2. Or use `text-embedding-3-small` (1536 dimensions) for broader compatibility
+    </Warning>
+
+    ```bash
+    # Recommended for most deployments
+    EMBEDDING_MODEL=text-embedding-3-small
+
+    # Higher quality (requires pgvector >= 0.7.0 for optimal indexing)
+    EMBEDDING_MODEL=text-embedding-3-large
+
+    # Google Gemini via OpenAI-compatible endpoint (free tier: 100 RPM) (requires pgvector >= 0.7.0 for optimal indexing)
+    OPENAI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+    OPENAI_API_KEY=your-google-ai-studio-api-key
+    EMBEDDING_MODEL=gemini-embedding-001
+    ```
+
+    <Tip>
+      **Google Gemini Free Tier**
+
+      `gemini-embedding-001` is available via Google's OpenAI-compatible endpoint at
+      `https://generativelanguage.googleapis.com/v1beta/openai`.
+      It operates through the standard `openaiApiBaseUrl` setting — no additional
+      configuration is required beyond setting the base URL, API key, and model name.
+      Google provides a generous **free tier of 100 RPM**, making it an excellent
+      choice for self-hosted or low-traffic deployments.
+    </Tip>
 
   </Accordion>
 
@@ -359,6 +420,129 @@ Smart Routing now supports group-scoped searches, allowing you to limit tool dis
     4. Returns results scoped to the group's servers
     
     If the group doesn't exist or has no servers, the search will return no results.
+  </Accordion>
+</AccordionGroup>
+
+### Progressive Disclosure Mode
+
+Progressive Disclosure is an optimization feature that reduces token usage when working with Smart Routing. When enabled, the tool discovery workflow changes from a 2-step to a 3-step process.
+
+<AccordionGroup>
+  <Accordion title="What is Progressive Disclosure?">
+    By default, Smart Routing returns full tool information including complete parameter schemas in `search_tools` results. This can consume significant tokens when dealing with tools that have complex input schemas.
+    
+    **Progressive Disclosure** changes this behavior:
+    - `search_tools` returns only tool names and descriptions (minimal info)
+    - A new `describe_tool` endpoint provides full parameter schema on demand
+    - `call_tool` executes the tool as before
+    
+    This approach is particularly useful when:
+    - Working with many tools with complex schemas
+    - Token usage optimization is important
+    - AI clients need to browse many tools before selecting one
+  </Accordion>
+
+  <Accordion title="Enabling Progressive Disclosure">
+    Enable Progressive Disclosure through the Settings page or environment variable:
+    
+    **Via Settings UI:**
+    1. Navigate to Settings → Smart Routing
+    2. Enable the "Progressive Disclosure" toggle
+    3. The change takes effect immediately
+    
+    **Via Environment Variable:**
+    ```bash
+    SMART_ROUTING_PROGRESSIVE_DISCLOSURE=true
+    ```
+  </Accordion>
+
+  <Accordion title="Standard Mode (Default)">
+    When Progressive Disclosure is **disabled** (default), Smart Routing provides two tools:
+    
+    **Workflow:** `search_tools` → `call_tool`
+    
+    | Tool | Purpose |
+    |------|---------|
+    | `search_tools` | Find tools by query, returns full tool info including `inputSchema` |
+    | `call_tool` | Execute a tool with the provided arguments |
+    
+    This mode is simpler but uses more tokens due to full schemas in search results.
+  </Accordion>
+
+  <Accordion title="Progressive Disclosure Mode">
+    When Progressive Disclosure is **enabled**, Smart Routing provides three tools:
+    
+    **Workflow:** `search_tools` → `describe_tool` → `call_tool`
+    
+    | Tool | Purpose |
+    |------|---------|
+    | `search_tools` | Find tools by query, returns only name and description |
+    | `describe_tool` | Get full schema for a specific tool (new) |
+    | `call_tool` | Execute a tool with the provided arguments |
+    
+    **Example workflow:**
+    1. AI calls `search_tools` with query "file operations"
+    2. Results show tool names and descriptions (minimal tokens)
+    3. AI calls `describe_tool` for a specific tool to get full `inputSchema`
+    4. AI calls `call_tool` with the correct arguments
+    
+    This mode reduces token usage by only fetching full schemas when needed.
+  </Accordion>
+
+  <Accordion title="Response Format Comparison">
+    **Standard Mode search_tools response:**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read contents of a file",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string", "description": "File path to read" },
+              "encoding": { "type": "string", "default": "utf-8" }
+            },
+            "required": ["path"]
+          }
+        }
+      ]
+    }
+    ```
+    
+    **Progressive Disclosure Mode search_tools response:**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read contents of a file"
+        }
+      ],
+      "metadata": {
+        "progressiveDisclosure": true,
+        "guideline": "Use describe_tool to get the full parameter schema before calling."
+      }
+    }
+    ```
+    
+    **describe_tool response:**
+    ```json
+    {
+      "tool": {
+        "name": "read_file",
+        "description": "Read contents of a file",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "File path to read" },
+            "encoding": { "type": "string", "default": "utf-8" }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+    ```
   </Accordion>
 </AccordionGroup>
 
@@ -673,11 +857,11 @@ curl -X POST http://localhost:3000/api/smart-routing/feedback \
 
     **Solutions:**
     1. Verify PostgreSQL is running
-    2. Check DATABASE_URL format
+    2. Check DB_URL format
     3. Ensure pgvector extension is installed
     4. Test connection manually:
     ```bash
-    psql $DATABASE_URL -c "SELECT 1;"
+    psql $DB_URL -c "SELECT 1;"
     ```
 
   </Accordion>

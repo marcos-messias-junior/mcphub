@@ -149,13 +149,26 @@ export interface OAuthProviderConfig {
   }>;
 }
 
+export interface BetterAuthProviderToggle {
+  enabled?: boolean; // Enable/disable the provider
+}
+
+export interface BetterAuthConfig {
+  enabled?: boolean; // Enable/disable Better Auth integration
+  basePath?: string; // Base path to mount Better Auth handler
+  providers?: {
+    google?: BetterAuthProviderToggle;
+    github?: BetterAuthProviderToggle;
+  };
+}
+
 export interface SystemConfig {
   routing?: {
     enableGlobalRoute?: boolean; // Controls whether the /sse endpoint without group is enabled
     enableGroupNameRoute?: boolean; // Controls whether group routing by name is allowed
-    enableBearerAuth?: boolean; // Controls whether bearer auth is enabled for group routes
-    bearerAuthKey?: string; // The bearer auth key to validate against
-    skipAuth?: boolean; // Controls whether authentication is required for frontend and API access
+    enableBearerAuth?: boolean; // Controls whether MCP endpoints require bearer authentication
+    bearerAuthKey?: string; // Legacy bearer auth key (used for one-time migration)
+    skipAuth?: boolean; // Controls whether the dashboard requires login
   };
   install?: {
     pythonIndexUrl?: string; // Python package repository URL (UV_DEFAULT_INDEX)
@@ -173,6 +186,9 @@ export interface SystemConfig {
   oauth?: OAuthProviderConfig; // OAuth provider configuration for upstream MCP servers
   oauthServer?: OAuthServerConfig; // OAuth authorization server configuration for MCPHub itself
   enableSessionRebuild?: boolean; // Controls whether server session rebuild is enabled
+  auth?: {
+    betterAuth?: BetterAuthConfig; // Better Auth integration configuration
+  };
 }
 
 export interface UserConfig {
@@ -268,11 +284,25 @@ export interface McpSettings {
   oauthClients?: IOAuthClient[]; // OAuth clients for MCPHub's authorization server
   oauthTokens?: IOAuthToken[]; // Persisted OAuth tokens (access + refresh) for authorization server
   bearerKeys?: BearerKey[]; // Bearer authentication keys (multi-key configuration)
+  prompts?: BuiltinPrompt[]; // Built-in configuration-driven prompt templates
+  resources?: BuiltinResource[]; // Built-in configuration-driven static resources
+}
+
+// Proxychains4 configuration for STDIO servers (Linux/macOS only)
+export interface ProxychainsConfig {
+  enabled?: boolean; // Enable/disable proxychains4 proxy routing
+  type?: 'socks4' | 'socks5' | 'http'; // Proxy protocol type
+  host?: string; // Proxy server hostname or IP address
+  port?: number; // Proxy server port
+  username?: string; // Proxy authentication username (optional)
+  password?: string; // Proxy authentication password (optional)
+  configPath?: string; // Path to custom proxychains4 configuration file (optional, overrides above settings)
 }
 
 // Configuration details for an individual server
 export interface ServerConfig {
   type?: 'stdio' | 'sse' | 'streamable-http' | 'openapi'; // Type of server
+  description?: string; // Optional server note/description for management UI
   url?: string; // URL for SSE or streamable HTTP servers
   command?: string; // Command to execute for stdio-based servers
   args?: string[]; // Arguments for the command
@@ -284,7 +314,10 @@ export interface ServerConfig {
   keepAliveInterval?: number; // Keep-alive ping interval in milliseconds (default: 60000ms for SSE servers)
   tools?: Record<string, { enabled: boolean; description?: string }>; // Tool-specific configurations with enable/disable state and custom descriptions
   prompts?: Record<string, { enabled: boolean; description?: string }>; // Prompt-specific configurations with enable/disable state and custom descriptions
+  resources?: Record<string, { enabled: boolean; description?: string }>; // Resource-specific configurations with enable/disable state and custom descriptions
   options?: Partial<Pick<RequestOptions, 'timeout' | 'resetTimeoutOnProgress' | 'maxTotalTimeout'>>; // MCP request options configuration
+  // Proxychains4 proxy configuration for STDIO servers (Linux/macOS only, Windows not supported)
+  proxy?: ProxychainsConfig;
   // OAuth authentication for upstream MCP servers
   oauth?: {
     // Static client configuration (traditional OAuth flow)
@@ -384,6 +417,7 @@ export interface ServerInfo {
   error: string | null; // Error message if any
   tools: Tool[]; // List of tools available on the server
   prompts: Prompt[]; // List of prompts available on the server
+  resources: Resource[]; // List of resources available on the server
   client?: Client; // Client instance for communication (MCP clients)
   transport?: SSEClientTransport | StdioClientTransport | StreamableHTTPClientTransport; // Transport mechanism used
   openApiClient?: any; // OpenAPI client instance for openapi type servers
@@ -420,6 +454,36 @@ export interface PromptArgument {
   title?: string; // Title of the argument
   description?: string; // Brief description of the argument
   required?: boolean; // Whether the argument is required
+}
+
+// Resource exposed by a connected MCP server
+export interface Resource {
+  uri: string; // Unique URI of the resource (e.g., 'file:///path' or custom scheme)
+  name?: string; // Human-readable name
+  description?: string; // Brief description of the resource
+  mimeType?: string; // MIME type of the resource content
+}
+
+// Built-in prompt defined via configuration
+export interface BuiltinPrompt {
+  id: string; // Unique identifier (UUID)
+  name: string; // Prompt name used in MCP protocol
+  title?: string; // Human-readable title
+  description?: string; // Brief description
+  template: string; // Template body with {{parameter}} placeholders
+  arguments?: PromptArgument[]; // Argument definitions matching placeholders
+  enabled?: boolean; // Whether this prompt is active (default: true)
+}
+
+// Built-in resource defined via configuration
+export interface BuiltinResource {
+  id: string; // Unique identifier (UUID)
+  uri: string; // Resource URI (e.g., 'resource://docs/guide')
+  name?: string; // Human-readable name
+  description?: string; // Brief description
+  mimeType?: string; // MIME type (default: 'text/plain')
+  content: string; // Static content of the resource
+  enabled?: boolean; // Whether this resource is active (default: true)
 }
 
 // Standardized API response structure
@@ -480,4 +544,43 @@ export interface BatchCreateGroupsResponse {
   successCount: number; // Number of groups successfully created
   failureCount: number; // Number of groups that failed
   results: BatchGroupResult[]; // Detailed results for each group
+}
+
+// Activity status types
+export type ActivityStatus = 'success' | 'error';
+
+// Activity interface for tracking tool calls
+export interface IActivity {
+  id?: string; // Unique identifier (auto-generated for DB)
+  timestamp: Date; // When the tool was called
+  server: string; // Server name that handled the call
+  tool: string; // Tool name that was called
+  duration: number; // Duration in milliseconds
+  status: ActivityStatus; // Call status
+  input?: string; // JSON stringified input arguments
+  output?: string; // JSON stringified output result
+  group?: string; // Group name if called via group route
+  keyId?: string; // Bearer key ID if authenticated with bearer token
+  keyName?: string; // Bearer key name for display purposes
+  errorMessage?: string; // Error message if status is 'error'
+}
+
+// Activity statistics interface
+export interface IActivityStats {
+  totalCalls: number;
+  successCount: number;
+  errorCount: number;
+  avgDuration: number; // Average duration in milliseconds
+}
+
+// Activity search/filter parameters
+export interface IActivityFilter {
+  server?: string;
+  tool?: string;
+  status?: ActivityStatus;
+  group?: string;
+  keyId?: string;
+  keyName?: string;
+  startDate?: Date;
+  endDate?: Date;
 }

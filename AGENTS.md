@@ -50,7 +50,7 @@ pnpm build                  # ~10 seconds total - NEVER CANCEL. Set timeout to 6
 pnpm dev
 
 # Verify backend responds (in another terminal)
-curl http://localhost:3000/api/health
+curl http://localhost:3000/health
 # Expected: Should return health status
 
 # Verify frontend serves
@@ -141,7 +141,7 @@ node scripts/verify-dist.js
 
 ```bash
 # Start both backend and frontend (recommended for most development)
-pnpm dev                    # Backend on :3001, Frontend on :5173
+pnpm dev                    # Backend on :3000 (or PORT env var), Frontend on :5173
 
 # OR start separately (required on Windows, optional on Linux/macOS)
 # Terminal 1: Backend only
@@ -186,6 +186,9 @@ pnpm test:coverage          # With coverage report
 # Code quality
 pnpm lint                   # ESLint - ~3 seconds
 pnpm format                 # Prettier formatting - ~3 seconds
+
+# Security audit
+pnpm audit                  # Check for vulnerabilities
 ```
 
 **CRITICAL**: All tests MUST pass before committing. Do not modify tests to make them pass unless specifically required for your changes.
@@ -325,16 +328,18 @@ When adding/changing fields, update **ALL** these files:
 
 ### Data Type Mapping
 
-| Model          | DAO               | DB Entity      | JSON Path                 |
-| -------------- | ----------------- | -------------- | ------------------------- |
-| `IUser`        | `UserDao`         | `User`         | `settings.users[]`        |
-| `ServerConfig` | `ServerDao`       | `Server`       | `settings.mcpServers{}`   |
-| `IGroup`       | `GroupDao`        | `Group`        | `settings.groups[]`       |
-| `SystemConfig` | `SystemConfigDao` | `SystemConfig` | `settings.systemConfig`   |
-| `UserConfig`   | `UserConfigDao`   | `UserConfig`   | `settings.userConfigs{}`  |
-| `BearerKey`    | `BearerKeyDao`    | `BearerKey`    | `settings.bearerKeys[]`   |
-| `IOAuthClient` | `OAuthClientDao`  | `OAuthClient`  | `settings.oauthClients[]` |
-| `IOAuthToken`  | `OAuthTokenDao`   | `OAuthToken`   | `settings.oauthTokens[]`  |
+| Model             | DAO                  | DB Entity         | JSON Path                 |
+| ----------------- | -------------------- | ----------------- | ------------------------- |
+| `IUser`           | `UserDao`            | `User`            | `settings.users[]`        |
+| `ServerConfig`    | `ServerDao`          | `Server`          | `settings.mcpServers{}`   |
+| `IGroup`          | `GroupDao`           | `Group`           | `settings.groups[]`       |
+| `SystemConfig`    | `SystemConfigDao`    | `SystemConfig`    | `settings.systemConfig`   |
+| `UserConfig`      | `UserConfigDao`      | `UserConfig`      | `settings.userConfigs{}`  |
+| `BearerKey`       | `BearerKeyDao`       | `BearerKey`       | `settings.bearerKeys[]`   |
+| `IOAuthClient`    | `OAuthClientDao`     | `OAuthClient`     | `settings.oauthClients[]` |
+| `IOAuthToken`     | `OAuthTokenDao`      | `OAuthToken`      | `settings.oauthTokens[]`  |
+| `BuiltinPrompt`   | `BuiltinPromptDao`   | `BuiltinPrompt`   | `settings.prompts[]`      |
+| `BuiltinResource` | `BuiltinResourceDao` | `BuiltinResource` | `settings.resources[]`    |
 
 ### Common Pitfalls
 

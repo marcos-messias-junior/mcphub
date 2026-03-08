@@ -24,11 +24,10 @@ export class VectorEmbedding {
   metadata: Record<string, any>; // Additional metadata about the embedding
 
   @Column({
-    type: 'float',
-    array: true,
+    type: 'vector' as any,
     nullable: true,
   })
-  embedding: number[]; // The vector embedding - will be converted to vector type after table creation
+  embedding: number[]; // The vector embedding stored as pgvector
 
   @Column({ type: 'int' })
   dimensions: number; // Dimensionality of the embedding vector

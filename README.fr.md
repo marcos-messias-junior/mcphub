@@ -18,6 +18,7 @@ MCPHub facilite la gestion et la mise à l'échelle de plusieurs serveurs MCP (M
 - **Routage intelligent** - Découverte d'outils propulsée par IA utilisant la recherche sémantique vectorielle ([En savoir plus](https://docs.mcphubx.com/features/smart-routing))
 - **Configuration à chaud** - Ajoutez, supprimez ou mettez à jour les serveurs sans temps d'arrêt
 - **Support OAuth 2.0** - Modes client et serveur pour une authentification sécurisée ([En savoir plus](https://docs.mcphubx.com/features/oauth))
+- **Connexion Sociale** - Support de connexion GitHub et Google via Better Auth (nécessite le mode Base de données)
 - **Mode Base de données** - Stockez la configuration dans PostgreSQL pour les environnements de production ([En savoir plus](https://docs.mcphubx.com/configuration/database-configuration))
 - **Prêt pour Docker** - Déployez instantanément avec la configuration conteneurisée
 
@@ -67,7 +68,10 @@ http://localhost:3000/mcp           # Tous les serveurs
 http://localhost:3000/mcp/{group}   # Groupe spécifique
 http://localhost:3000/mcp/{server}  # Serveur spécifique
 http://localhost:3000/mcp/$smart    # Routage intelligent
+http://localhost:3000/mcp/$smart/{group}  # Routage intelligent dans un groupe
 ```
+
+> **Note de sécurité** : Les points de terminaison MCP nécessitent une authentification par défaut pour éviter toute exposition accidentelle. Pour autoriser l'accès MCP sans authentification, désactivez **Activer l'authentification Bearer** dans la section Clés. **Ignorer l'authentification** n'affecte que la connexion au tableau de bord. À utiliser uniquement dans des environnements de confiance.
 
 📖 Consultez la [Référence API](https://docs.mcphubx.com/api-reference) pour la documentation détaillée des points de terminaison.
 

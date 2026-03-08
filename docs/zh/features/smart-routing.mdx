@@ -64,16 +64,180 @@ description: '使用向量语义搜索的 AI 工具发现系统'
 <Tabs>
   <Tab title="HTTP MCP">
     ```
+    # 搜索所有服务器
     http://localhost:3000/mcp/$smart
+    
+    # 在特定分组内搜索
+    http://localhost:3000/mcp/$smart/{group}
     ```
   </Tab>
 
   <Tab title="SSE (Legacy)">
     ```
+    # 搜索所有服务器
     http://localhost:3000/sse/$smart
+    
+    # 在特定分组内搜索
+    http://localhost:3000/sse/$smart/{group}
     ```
   </Tab>
 </Tabs>
+
+### 分组范围的智能路由
+
+智能路由支持分组范围的搜索，允许您将工具发现限制在特定分组内的服务器：
+
+<AccordionGroup>
+  <Accordion title="使用分组范围的智能路由">
+    将您的 AI 客户端连接到特定分组的智能路由端点：
+    
+    ```
+    http://localhost:3000/mcp/$smart/production
+    ```
+    
+    此端点只会搜索属于 "production" 分组的服务器中的工具。
+    
+    **优势：**
+    - **聚焦结果**：只返回相关服务器的工具
+    - **更好的性能**：减少搜索空间以加快查询速度
+    - **环境隔离**：将开发、预发布和生产工具分开
+    - **访问控制**：根据用户权限限制工具发现
+  </Accordion>
+
+  <Accordion title="工作原理">
+    当使用 `$smart/{group}` 时：
+    
+    1. 系统识别指定的分组
+    2. 获取属于该分组的所有服务器
+    3. 将工具搜索过滤到仅限那些服务器
+    4. 返回限定在该分组服务器范围内的结果
+    
+    如果分组不存在或没有服务器，搜索将不返回任何结果。
+  </Accordion>
+</AccordionGroup>
+
+### 渐进式披露模式
+
+渐进式披露是一个优化功能，可以减少使用智能路由时的 Token 消耗。启用后，工具发现工作流从 2 步变为 3 步。
+
+<AccordionGroup>
+  <Accordion title="什么是渐进式披露？">
+    默认情况下，智能路由在 `search_tools` 结果中返回完整的工具信息，包括完整的参数模式。当处理具有复杂输入模式的工具时，这会消耗大量 Token。
+    
+    **渐进式披露** 改变了这种行为：
+    - `search_tools` 只返回工具名称和描述（最少信息）
+    - 新的 `describe_tool` 端点按需提供完整的参数模式
+    - `call_tool` 像以前一样执行工具
+    
+    这种方法特别适用于：
+    - 处理具有复杂模式的大量工具
+    - Token 使用优化很重要的场景
+    - AI 客户端需要浏览多个工具后再选择
+  </Accordion>
+
+  <Accordion title="启用渐进式披露">
+    通过设置页面或环境变量启用渐进式披露：
+    
+    **通过设置界面：**
+    1. 导航到 设置 → 智能路由
+    2. 启用"渐进式披露"开关
+    3. 更改立即生效
+    
+    **通过环境变量：**
+    ```bash
+    SMART_ROUTING_PROGRESSIVE_DISCLOSURE=true
+    ```
+  </Accordion>
+
+  <Accordion title="标准模式（默认）">
+    当渐进式披露**禁用**（默认）时，智能路由提供两个工具：
+    
+    **工作流：** `search_tools` → `call_tool`
+    
+    | 工具 | 用途 |
+    |------|------|
+    | `search_tools` | 按查询查找工具，返回包含 `inputSchema` 的完整工具信息 |
+    | `call_tool` | 使用提供的参数执行工具 |
+    
+    这种模式更简单，但由于搜索结果中包含完整模式，会使用更多 Token。
+  </Accordion>
+
+  <Accordion title="渐进式披露模式">
+    当渐进式披露**启用**时，智能路由提供三个工具：
+    
+    **工作流：** `search_tools` → `describe_tool` → `call_tool`
+    
+    | 工具 | 用途 |
+    |------|------|
+    | `search_tools` | 按查询查找工具，只返回名称和描述 |
+    | `describe_tool` | 获取特定工具的完整模式（新增） |
+    | `call_tool` | 使用提供的参数执行工具 |
+    
+    **示例工作流：**
+    1. AI 使用查询 "文件操作" 调用 `search_tools`
+    2. 结果显示工具名称和描述（最少 Token）
+    3. AI 为特定工具调用 `describe_tool` 获取完整的 `inputSchema`
+    4. AI 使用正确的参数调用 `call_tool`
+    
+    这种模式通过仅在需要时获取完整模式来减少 Token 使用。
+  </Accordion>
+
+  <Accordion title="响应格式对比">
+    **标准模式 search_tools 响应：**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "读取文件内容",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string", "description": "要读取的文件路径" },
+              "encoding": { "type": "string", "default": "utf-8" }
+            },
+            "required": ["path"]
+          }
+        }
+      ]
+    }
+    ```
+    
+    **渐进式披露模式 search_tools 响应：**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "读取文件内容"
+        }
+      ],
+      "metadata": {
+        "progressiveDisclosure": true,
+        "guideline": "使用 describe_tool 获取完整的参数模式后再调用。"
+      }
+    }
+    ```
+    
+    **describe_tool 响应：**
+    ```json
+    {
+      "tool": {
+        "name": "read_file",
+        "description": "读取文件内容",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "要读取的文件路径" },
+            "encoding": { "type": "string", "default": "utf-8" }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
 
 {/* ## 性能优化
 
@@ -171,6 +335,65 @@ curl http://localhost:3000/api/smart-routing/embedding-stats \
 
 ## 高级功能
 
+### 嵌入模型选择
+
+不同的嵌入模型产生不同的向量维度。根据您的性能和精度需求选择：
+
+| 模型 | 维度 | 索引类型 | 说明 |
+|------|------|----------|------|
+| `text-embedding-3-small` | 1536 | HNSW | **推荐** - 质量和性能的最佳平衡 |
+| `text-embedding-3-large` | 3072 | HNSW (halfvec) | 更高质量，需要 pgvector ≥ 0.7.0 |
+| `bge-m3` | 1024 | HNSW | 开源替代方案 |
+| `gemini-embedding-001` | 3072 | HNSW (halfvec) | Google Gemini — 免费额度（100 RPM），兼容 OpenAI 接口，需要 pgvector ≥ 0.7.0 |
+
+<Info>
+  **HNSW 是推荐的索引类型**
+  
+  MCPHub 默认使用 HNSW 索引，因为：
+  - 比 IVFFlat 有更好的查询性能
+  - 可以在没有数据的情况下立即创建
+  - 随着数据分布变化更加稳健
+</Info>
+
+<Warning>
+  **向量维度限制（pgvector 0.7.0+）**
+  
+  - `vector` 类型：最多 **2,000 维**（HNSW 或 IVFFlat）
+  - `halfvec` 类型：最多 **4,000 维**（自动用于高维嵌入）
+  
+  对于 3072 维的模型（`text-embedding-3-large`、`gemini-embedding-001`）：
+  - 需要 pgvector ≥ 0.7.0 以支持 halfvec
+  - MCPHub 自动使用 halfvec 类型转换以获得最佳索引
+  - 旧版 pgvector 仍可工作，但没有索引优化
+  
+  **建议：**
+  1. 升级到 pgvector 0.7.0+ 以获得最佳高维嵌入支持
+  2. 或使用 `text-embedding-3-small`（1536 维）以获得更广泛的兼容性
+</Warning>
+
+```bash
+# 大多数部署的推荐配置
+EMBEDDING_MODEL=text-embedding-3-small
+
+# 更高质量（需要 pgvector >= 0.7.0 以获得最佳索引）
+EMBEDDING_MODEL=text-embedding-3-large
+
+# 通过 OpenAI 兼容接口使用 Google Gemini（免费额度：100 RPM，需 pgvector ≥ 0.7.0）
+OPENAI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+OPENAI_API_KEY=your-google-ai-studio-api-key
+EMBEDDING_MODEL=gemini-embedding-001
+```
+
+<Tip>
+  **Google Gemini 免费额度**
+
+  `gemini-embedding-001` 可通过 Google 的 OpenAI 兼容接口
+  `https://generativelanguage.googleapis.com/v1beta/openai` 使用。
+  只需通过标准的 `openaiApiBaseUrl` 设置即可接入，无需任何额外配置，
+  仅需设置 Base URL、API Key 和模型名称。
+  Google 提供慷慨的**免费额度（100 RPM）**，非常适合自托管或低流量部署。
+</Tip>
+
 ### 自定义嵌入
 
 使用自定义嵌入模型：
@@ -245,11 +468,11 @@ curl -X POST http://localhost:3000/api/smart-routing/feedback \
 
     **解决方案：**
     1. 验证 PostgreSQL 是否正在运行
-    2. 检查 DATABASE_URL 格式
+    2. 检查 DB_URL 格式
     3. 确保安装了 pgvector 扩展
     4. 手动测试连接：
     ```bash
-    psql $DATABASE_URL -c "SELECT 1;"
+    psql $DB_URL -c "SELECT 1;"
     ```
 
   </Accordion>

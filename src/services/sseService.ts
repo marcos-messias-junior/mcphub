@@ -12,8 +12,16 @@ import { RequestContextService } from './requestContextService.js';
 import { IUser, BearerKey } from '../types/index.js';
 import { resolveOAuthUserFromToken } from '../utils/oauthBearer.js';
 
+export interface SessionContext {
+  transport: Transport;
+  group: string;
+  needsInitialization?: boolean;
+  keyId?: string;
+  keyName?: string;
+}
+
 export const transports: {
-  [sessionId: string]: { transport: Transport; group: string; needsInitialization?: boolean };
+  [sessionId: string]: SessionContext;
 } = {};
 
 // Session creation locks to prevent concurrent session creation conflicts
@@ -23,8 +31,19 @@ export const getGroup = (sessionId: string): string => {
   return transports[sessionId]?.group || '';
 };
 
+export const getSessionContext = (
+  sessionId: string,
+): { group: string; keyId?: string; keyName?: string } => {
+  const session = transports[sessionId];
+  return {
+    group: session?.group || '',
+    keyId: session?.keyId,
+    keyName: session?.keyName,
+  };
+};
+
 type BearerAuthResult =
-  | { valid: true; user?: IUser }
+  | { valid: true; user?: IUser; keyId?: string; keyName?: string }
   | {
       valid: false;
       reason: 'missing' | 'invalid';
@@ -147,15 +166,17 @@ const isBearerKeyAllowedForRequest = async (req: Request, key: BearerKey): Promi
 };
 
 const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
+  const systemConfigDao = getSystemConfigDao();
+  const systemConfig = await systemConfigDao.get();
+  const enableBearerAuth = systemConfig?.routing?.enableBearerAuth ?? true;
+
   const bearerKeyDao = getBearerKeyDao();
   const enabledKeys = await bearerKeyDao.findEnabled();
 
   const authHeader = req.headers.authorization;
   const hasBearerHeader = !!authHeader && authHeader.startsWith('Bearer ');
 
-  // If no enabled keys are configured, bearer auth is effectively disabled.
-  // We still allow OAuth bearer tokens to attach user context in this case.
-  if (enabledKeys.length === 0) {
+  if (!enableBearerAuth) {
     if (!hasBearerHeader) {
       return { valid: true };
     }
@@ -165,17 +186,31 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
       return { valid: true };
     }
 
+    const matchingKey = enabledKeys.find((key) => key.token === token);
+    if (matchingKey) {
+      const allowed = await isBearerKeyAllowedForRequest(req, matchingKey);
+      if (allowed) {
+        console.log(
+          `Bearer key recognized (auth disabled): id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
+        );
+        return { valid: true, keyId: matchingKey.id, keyName: matchingKey.name };
+      }
+
+      console.warn(
+        `Bearer key matched but rejected due to scope restrictions (auth disabled): id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
+      );
+      return { valid: true };
+    }
+
     const oauthUser = await resolveOAuthUserFromToken(token);
     if (oauthUser) {
-      console.log('Authenticated request using OAuth bearer token without configured keys');
+      console.log('Recognized OAuth bearer token (auth disabled)');
       return { valid: true, user: oauthUser };
     }
 
-    // When there are no keys, a non-OAuth bearer token should not block access
     return { valid: true };
   }
 
-  // When keys exist, bearer header is required
   if (!hasBearerHeader) {
     return { valid: false, reason: 'missing' };
   }
@@ -185,7 +220,19 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
     return { valid: false, reason: 'missing' };
   }
 
-  // First, try to match a configured bearer key
+  if (enabledKeys.length === 0) {
+    const oauthUser = await resolveOAuthUserFromToken(token);
+    if (oauthUser) {
+      console.log('Authenticated request using OAuth bearer token without configured keys');
+      return { valid: true, user: oauthUser };
+    }
+
+    console.warn(
+      'Bearer authentication failed: no configured keys and token is not a valid OAuth token',
+    );
+    return { valid: false, reason: 'invalid' };
+  }
+
   const matchingKey = enabledKeys.find((key) => key.token === token);
   if (matchingKey) {
     const allowed = await isBearerKeyAllowedForRequest(req, matchingKey);
@@ -199,10 +246,9 @@ const validateBearerAuth = async (req: Request): Promise<BearerAuthResult> => {
     console.log(
       `Bearer key authenticated: id=${matchingKey.id}, name=${matchingKey.name}, accessType=${matchingKey.accessType}`,
     );
-    return { valid: true };
+    return { valid: true, keyId: matchingKey.id, keyName: matchingKey.name };
   }
 
-  // Fallback: treat token as potential OAuth access token
   const oauthUser = await resolveOAuthUserFromToken(token);
   if (oauthUser) {
     console.log('Authenticated request using OAuth bearer token (no matching static key)');
@@ -334,7 +380,7 @@ export const handleSseConnection = async (req: Request, res: Response): Promise<
   const routingConfig = systemConfig?.routing || {
     enableGlobalRoute: true,
     enableGroupNameRoute: true,
-    enableBearerAuth: false,
+    enableBearerAuth: true,
     bearerAuthKey: '',
   };
   const group = req.params.group;
@@ -360,7 +406,12 @@ export const handleSseConnection = async (req: Request, res: Response): Promise<
   console.log(`Creating SSE transport with messages path: ${messagesPath}`);
 
   const transport = new SSEServerTransport(messagesPath, res);
-  transports[transport.sessionId] = { transport, group: group };
+  transports[transport.sessionId] = {
+    transport,
+    group: group,
+    keyId: bearerAuthResult.keyId,
+    keyName: bearerAuthResult.keyName,
+  };
 
   res.on('close', () => {
     delete transports[transport.sessionId];
@@ -377,6 +428,20 @@ export const handleSseConnection = async (req: Request, res: Response): Promise<
 export const handleSseMessage = async (req: Request, res: Response): Promise<void> => {
   // User context is now set by sseUserContextMiddleware
   const userContextService = UserContextService.getInstance();
+
+  // Pre-populate group from session context BEFORE auth validation.
+  // When a group-scoped bearer key is used to connect via /sse/:group, the session
+  // stores the group. Subsequent /messages requests arrive on the global route
+  // (no :group param), so isBearerKeyAllowedForRequest would see an empty paramValue
+  // and reject the key with 401. Injecting the group here lets the validator use
+  // the correct scope from the already-authenticated session.
+  const preSessionId = req.query.sessionId as string;
+  if (preSessionId && transports[preSessionId] && !req.params.group) {
+    const sessionGroup = transports[preSessionId].group;
+    if (sessionGroup) {
+      req.params.group = sessionGroup;
+    }
+  }
 
   // Check bearer auth using filtered settings
   const bearerAuthResult = await validateBearerAuth(req);
@@ -407,7 +472,7 @@ export const handleSseMessage = async (req: Request, res: Response): Promise<voi
     return;
   }
 
-  const { transport, group } = transportData;
+  const { transport, group, keyId, keyName } = transportData;
   req.params.group = group;
   req.query.group = group;
   console.log(
@@ -417,6 +482,11 @@ export const handleSseMessage = async (req: Request, res: Response): Promise<voi
   // Set request context for MCP handlers to access HTTP headers
   const requestContextService = RequestContextService.getInstance();
   requestContextService.setRequestContext(req);
+  // Set bearer key and group context for activity logging (from session or current request)
+  const currentKeyId = bearerAuthResult.keyId || keyId;
+  const currentKeyName = bearerAuthResult.keyName || keyName;
+  requestContextService.setBearerKeyContext(currentKeyId, currentKeyName);
+  requestContextService.setGroupContext(group);
 
   try {
     await (transport as SSEServerTransport).handlePostMessage(req, res);
@@ -620,8 +690,19 @@ export const handleMcpPostRequest = async (req: Request, res: Response): Promise
       `[SESSION CREATE] No session ID provided for initialize request, creating new session${username ? ` for user: ${username}` : ''}`,
     );
     transport = await createNewSession(group, username);
+  } else if (
+    req.body &&
+    typeof req.body.method === 'string' &&
+    req.body.method.startsWith('notifications/')
+  ) {
+    // Case 4: Session-less notification requests should be acknowledged and ignored
+    console.log(
+      `[SESSION SKIP] Ignoring session-less notification request (method: ${req.body.method})${username ? ` for user: ${username}` : ''}`,
+    );
+    res.status(200).end();
+    return;
   } else {
-    // Case 4: No sessionId and not an initialize request, return error
+    // Case 5: No sessionId and not an initialize/notification request, return error
     console.warn(
       `[SESSION ERROR] No session ID provided for non-initialize request (method: ${req.body?.method})${username ? ` for user: ${username}` : ''}`,
     );
@@ -641,6 +722,9 @@ export const handleMcpPostRequest = async (req: Request, res: Response): Promise
   // Set request context for MCP handlers to access HTTP headers
   const requestContextService = RequestContextService.getInstance();
   requestContextService.setRequestContext(req);
+  // Set bearer key and group context for activity logging
+  requestContextService.setBearerKeyContext(bearerAuthResult.keyId, bearerAuthResult.keyName);
+  requestContextService.setGroupContext(group);
 
   // Check if the session needs initialization (for rebuilt sessions)
   if (transportInfo && transportInfo.needsInitialization) {

@@ -7,6 +7,7 @@ import {
   BatchCreateServersResponse,
   BatchServerResult,
   ServerConfig,
+  ServerInfo,
 } from '../types/index.js';
 import {
   getServersInfo,
@@ -24,13 +25,66 @@ import { createSafeJSON } from '../utils/serialization.js';
 import { cloneDefaultOAuthServerConfig } from '../constants/oauthServerDefaults.js';
 import { getServerDao, getGroupDao, getSystemConfigDao } from '../dao/DaoFactory.js';
 import { getBearerKeyDao } from '../dao/DaoFactory.js';
+import { UserContextService } from '../services/userContextService.js';
 
-export const getAllServers = async (_: Request, res: Response): Promise<void> => {
+export const getAllServers = async (req: Request, res: Response): Promise<void> => {
   try {
-    const serversInfo = await getServersInfo();
+    // Parse pagination parameters from query string
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
+    // Validate pagination parameters
+    if (page < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Page number must be greater than 0',
+      });
+      return;
+    }
+
+    if (limit !== undefined && (limit < 1 || limit > 1000)) {
+      res.status(400).json({
+        success: false,
+        message: 'Limit must be between 1 and 1000',
+      });
+      return;
+    }
+
+    // Get current user for filtering
+    const currentUser = UserContextService.getInstance().getCurrentUser();
+    const isAdmin = !currentUser || currentUser.isAdmin;
+
+    // Get servers info with pagination if limit is specified
+    let serversInfo: Omit<ServerInfo, 'client' | 'transport'>[];
+    let pagination = undefined;
+
+    if (limit !== undefined) {
+      // Use DAO layer pagination with proper filtering
+      const serverDao = getServerDao();
+      const paginatedResult = isAdmin
+        ? await serverDao.findAllPaginated(page, limit)
+        : await serverDao.findByOwnerPaginated(currentUser!.username, page, limit);
+
+      // Get runtime info for paginated servers
+      serversInfo = await getServersInfo(page, limit, currentUser);
+
+      pagination = {
+        page: paginatedResult.page,
+        limit: paginatedResult.limit,
+        total: paginatedResult.total,
+        totalPages: paginatedResult.totalPages,
+        hasNextPage: paginatedResult.page < paginatedResult.totalPages,
+        hasPrevPage: paginatedResult.page > 1,
+      };
+    } else {
+      // No pagination, get all servers (will be filtered by mcpService)
+      serversInfo = await getServersInfo();
+    }
+
     const response: ApiResponse = {
       success: true,
       data: createSafeJSON(serversInfo),
+      ...(pagination && { pagination }),
     };
     res.json(response);
   } catch (error) {
@@ -564,10 +618,9 @@ export const updateServer = async (req: Request, res: Response): Promise<void> =
       });
     }
   } catch (error) {
-    console.error('Failed to update server:', error);
     res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : 'Internal server error',
+      message: 'Internal server error',
     });
   }
 };
@@ -851,9 +904,16 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
       smartRouting &&
       (typeof smartRouting.enabled === 'boolean' ||
         typeof smartRouting.dbUrl === 'string' ||
+        typeof smartRouting.embeddingProvider === 'string' ||
+        typeof smartRouting.embeddingEncodingFormat === 'string' ||
         typeof smartRouting.openaiApiBaseUrl === 'string' ||
         typeof smartRouting.openaiApiKey === 'string' ||
-        typeof smartRouting.openaiApiEmbeddingModel === 'string');
+        typeof smartRouting.openaiApiEmbeddingModel === 'string' ||
+        typeof smartRouting.azureOpenaiEndpoint === 'string' ||
+        typeof smartRouting.azureOpenaiApiKey === 'string' ||
+        typeof smartRouting.azureOpenaiApiVersion === 'string' ||
+        typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string' ||
+        typeof smartRouting.progressiveDisclosure === 'boolean');
 
     const hasMcpRouterUpdate =
       mcpRouter &&
@@ -905,7 +965,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         routing: {
           enableGlobalRoute: true,
           enableGroupNameRoute: true,
-          enableBearerAuth: false,
+          enableBearerAuth: true,
           bearerAuthKey: '',
           skipAuth: false,
         },
@@ -917,9 +977,14 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         smartRouting: {
           enabled: false,
           dbUrl: '',
+          embeddingProvider: 'openai',
           openaiApiBaseUrl: '',
           openaiApiKey: '',
           openaiApiEmbeddingModel: '',
+          azureOpenaiEndpoint: '',
+          azureOpenaiApiKey: '',
+          azureOpenaiApiVersion: '',
+          azureOpenaiEmbeddingDeployment: '',
         },
         mcpRouter: {
           apiKey: '',
@@ -935,7 +1000,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
       systemConfig.routing = {
         enableGlobalRoute: true,
         enableGroupNameRoute: true,
-        enableBearerAuth: false,
+        enableBearerAuth: true,
         bearerAuthKey: '',
         skipAuth: false,
       };
@@ -953,9 +1018,14 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
       systemConfig.smartRouting = {
         enabled: false,
         dbUrl: '',
+        embeddingProvider: 'openai',
         openaiApiBaseUrl: '',
         openaiApiKey: '',
         openaiApiEmbeddingModel: '',
+        azureOpenaiEndpoint: '',
+        azureOpenaiApiKey: '',
+        azureOpenaiApiVersion: '',
+        azureOpenaiEmbeddingDeployment: '',
       };
     }
 
@@ -1030,50 +1100,127 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
     let needsSync = false;
 
     if (smartRouting) {
+      if (typeof smartRouting.embeddingProvider === 'string') {
+        const normalized = smartRouting.embeddingProvider.trim().toLowerCase();
+        systemConfig.smartRouting.embeddingProvider =
+          normalized === 'azure' || normalized === 'azure_openai' ? 'azure_openai' : 'openai';
+      }
+
+      if (typeof smartRouting.embeddingEncodingFormat === 'string') {
+        const normalized = smartRouting.embeddingEncodingFormat.trim().toLowerCase();
+        systemConfig.smartRouting.embeddingEncodingFormat =
+          normalized === 'base64' || normalized === 'float' ? normalized : 'auto';
+      }
+
       if (typeof smartRouting.enabled === 'boolean') {
         // If enabling Smart Routing, validate required fields
         if (smartRouting.enabled) {
           const currentDbUrl =
             process.env.DB_URL || smartRouting.dbUrl || systemConfig.smartRouting.dbUrl;
-          const currentOpenaiApiKey =
-            smartRouting.openaiApiKey || systemConfig.smartRouting.openaiApiKey;
 
-          if (!currentDbUrl || !currentOpenaiApiKey) {
-            const missingFields = [];
-            if (!currentDbUrl) missingFields.push('Database URL');
-            if (!currentOpenaiApiKey) missingFields.push('OpenAI API Key');
-
+          if (!currentDbUrl) {
             res.status(400).json({
-              success: false,
-              message: `Smart Routing requires the following fields: ${missingFields.join(', ')}`,
+              message:
+                'Smart routing cannot be enabled without Database URL. Please provide DB URL.',
             });
             return;
+          }
+
+          const effectiveProvider =
+            (typeof smartRouting.embeddingProvider === 'string'
+              ? smartRouting.embeddingProvider
+              : systemConfig.smartRouting.embeddingProvider) || 'openai';
+
+          if (effectiveProvider === 'azure_openai') {
+            const currentAzureEndpoint =
+              smartRouting.azureOpenaiEndpoint || systemConfig.smartRouting.azureOpenaiEndpoint;
+            const currentAzureKey =
+              smartRouting.azureOpenaiApiKey || systemConfig.smartRouting.azureOpenaiApiKey;
+            const currentAzureDeployment =
+              smartRouting.azureOpenaiEmbeddingDeployment ||
+              systemConfig.smartRouting.azureOpenaiEmbeddingDeployment;
+            const currentAzureApiVersion =
+              smartRouting.azureOpenaiApiVersion || systemConfig.smartRouting.azureOpenaiApiVersion;
+
+            if (
+              !currentAzureEndpoint ||
+              !currentAzureKey ||
+              !currentAzureApiVersion ||
+              !currentAzureDeployment
+            ) {
+              res.status(400).json({
+                message:
+                  'Smart routing cannot be enabled without Azure OpenAI configuration. Please provide endpoint, API key, embedding deployment, and API version.',
+              });
+              return;
+            }
+          } else {
+            const currentOpenAiKey =
+              smartRouting.openaiApiKey || systemConfig.smartRouting.openaiApiKey;
+            if (!currentOpenAiKey) {
+              res.status(400).json({
+                message:
+                  'Smart routing cannot be enabled without OpenAI API key. Please provide an OpenAI API key.',
+              });
+              return;
+            }
           }
         }
         systemConfig.smartRouting.enabled = smartRouting.enabled;
       }
       if (typeof smartRouting.dbUrl === 'string') {
-        systemConfig.smartRouting.dbUrl = smartRouting.dbUrl;
+        systemConfig.smartRouting.dbUrl = smartRouting.dbUrl?.trim();
       }
       if (typeof smartRouting.openaiApiBaseUrl === 'string') {
-        systemConfig.smartRouting.openaiApiBaseUrl = smartRouting.openaiApiBaseUrl;
+        systemConfig.smartRouting.openaiApiBaseUrl = smartRouting.openaiApiBaseUrl?.trim();
       }
       if (typeof smartRouting.openaiApiKey === 'string') {
-        systemConfig.smartRouting.openaiApiKey = smartRouting.openaiApiKey;
+        systemConfig.smartRouting.openaiApiKey = smartRouting.openaiApiKey?.trim();
       }
       if (typeof smartRouting.openaiApiEmbeddingModel === 'string') {
-        systemConfig.smartRouting.openaiApiEmbeddingModel = smartRouting.openaiApiEmbeddingModel;
+        systemConfig.smartRouting.openaiApiEmbeddingModel =
+          smartRouting.openaiApiEmbeddingModel?.trim();
+      }
+
+      if (typeof smartRouting.azureOpenaiEndpoint === 'string') {
+        systemConfig.smartRouting.azureOpenaiEndpoint = smartRouting.azureOpenaiEndpoint?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiApiKey === 'string') {
+        systemConfig.smartRouting.azureOpenaiApiKey = smartRouting.azureOpenaiApiKey?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiApiVersion === 'string') {
+        systemConfig.smartRouting.azureOpenaiApiVersion = smartRouting.azureOpenaiApiVersion?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string') {
+        systemConfig.smartRouting.azureOpenaiEmbeddingDeployment =
+          smartRouting.azureOpenaiEmbeddingDeployment?.trim();
+      }
+
+      if (typeof smartRouting.progressiveDisclosure === 'boolean') {
+        systemConfig.smartRouting.progressiveDisclosure = smartRouting.progressiveDisclosure;
       }
 
       // Check if we need to sync embeddings
       const isNowEnabled = systemConfig.smartRouting.enabled || false;
       const hasConfigChanged =
         previousSmartRoutingConfig.dbUrl !== systemConfig.smartRouting.dbUrl ||
+        previousSmartRoutingConfig.embeddingProvider !==
+          systemConfig.smartRouting.embeddingProvider ||
+        previousSmartRoutingConfig.embeddingEncodingFormat !==
+          systemConfig.smartRouting.embeddingEncodingFormat ||
         previousSmartRoutingConfig.openaiApiBaseUrl !==
           systemConfig.smartRouting.openaiApiBaseUrl ||
         previousSmartRoutingConfig.openaiApiKey !== systemConfig.smartRouting.openaiApiKey ||
         previousSmartRoutingConfig.openaiApiEmbeddingModel !==
-          systemConfig.smartRouting.openaiApiEmbeddingModel;
+          systemConfig.smartRouting.openaiApiEmbeddingModel ||
+        previousSmartRoutingConfig.azureOpenaiEndpoint !==
+          systemConfig.smartRouting.azureOpenaiEndpoint ||
+        previousSmartRoutingConfig.azureOpenaiApiKey !==
+          systemConfig.smartRouting.azureOpenaiApiKey ||
+        previousSmartRoutingConfig.azureOpenaiApiVersion !==
+          systemConfig.smartRouting.azureOpenaiApiVersion ||
+        previousSmartRoutingConfig.azureOpenaiEmbeddingDeployment !==
+          systemConfig.smartRouting.azureOpenaiEmbeddingDeployment;
 
       // Sync if: first time enabling OR smart routing is enabled and any config changed
       needsSync = (!wasSmartRoutingEnabled && isNowEnabled) || (isNowEnabled && hasConfigChanged);
@@ -1316,6 +1463,143 @@ export const updatePromptDescription = async (req: Request, res: Response): Prom
     res.json({
       success: true,
       message: `Prompt ${promptName} description updated successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Toggle resource status for a specific server
+export const toggleResource = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/resource names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const resourceUri = decodeURIComponent(req.params.resourceUri);
+    const { enabled } = req.body;
+
+    if (!serverName || !resourceUri) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and resource URI are required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const serverDao = getServerDao();
+    const server = await serverDao.findById(serverName);
+
+    if (!server) {
+      res.status(404).json({
+        success: false,
+        message: 'Server not found',
+      });
+      return;
+    }
+
+    // Initialize resources config if it doesn't exist
+    const resources = server.resources || {};
+
+    // Set the resource's enabled state (preserve existing description if any)
+    resources[resourceUri] = { ...resources[resourceUri], enabled };
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateResources(serverName, resources);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools/resources metadata has changed
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Resource ${resourceUri} ${enabled ? 'enabled' : 'disabled'} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Update resource description for a specific server
+export const updateResourceDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/resource names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const resourceUri = decodeURIComponent(req.params.resourceUri);
+    const { description } = req.body;
+
+    if (!serverName || !resourceUri) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and resource URI are required',
+      });
+      return;
+    }
+
+    if (typeof description !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Description must be a string',
+      });
+      return;
+    }
+
+    const serverDao = getServerDao();
+    const server = await serverDao.findById(serverName);
+
+    if (!server) {
+      res.status(404).json({
+        success: false,
+        message: 'Server not found',
+      });
+      return;
+    }
+
+    // Initialize resources config if it doesn't exist
+    const resources = server.resources || {};
+
+    // Set the resource's description
+    if (!resources[resourceUri]) {
+      resources[resourceUri] = { enabled: true };
+    }
+    resources[resourceUri].description = description;
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateResources(serverName, resources);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools/resources metadata has changed
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Resource ${resourceUri} description updated successfully`,
     });
   } catch (error) {
     res.status(500).json({

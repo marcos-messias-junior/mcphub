@@ -45,5 +45,7 @@
       }
     }
   },
-  "bearerKeys": []
+  "bearerKeys": [],
+  "prompts": [],
+  "resources": []
 }

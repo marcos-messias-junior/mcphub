@@ -3,9 +3,30 @@ import { BaseDao } from './base/BaseDao.js';
 import { JsonFileBaseDao } from './base/JsonFileBaseDao.js';
 
 /**
+ * Pagination result interface
+ */
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/**
  * Server DAO interface with server-specific operations
  */
 export interface ServerDao extends BaseDao<ServerConfigWithName, string> {
+  /**
+   * Find all servers with pagination
+   */
+  findAllPaginated(page: number, limit: number): Promise<PaginatedResult<ServerConfigWithName>>;
+
+  /**
+   * Find servers by owner with pagination
+   */
+  findByOwnerPaginated(owner: string, page: number, limit: number): Promise<PaginatedResult<ServerConfigWithName>>;
+
   /**
    * Find servers by owner
    */
@@ -40,6 +61,14 @@ export interface ServerDao extends BaseDao<ServerConfigWithName, string> {
   updatePrompts(
     name: string,
     prompts: Record<string, { enabled: boolean; description?: string }>,
+  ): Promise<boolean>;
+
+  /**
+   * Update server resources configuration
+   */
+  updateResources(
+    name: string,
+    resources: Record<string, { enabled: boolean; description?: string }>,
   ): Promise<boolean>;
 
   /**
@@ -176,6 +205,61 @@ export class ServerDaoImpl extends JsonFileBaseDao implements ServerDao {
     return servers.length;
   }
 
+  async findAllPaginated(page: number, limit: number): Promise<PaginatedResult<ServerConfigWithName>> {
+    const allServers = await this.getAll();
+    // Sort: enabled servers first, then by creation time
+    const sortedServers = allServers.sort((a, b) => {
+      const aEnabled = a.enabled !== false;
+      const bEnabled = b.enabled !== false;
+      if (aEnabled !== bEnabled) {
+        return aEnabled ? -1 : 1;
+      }
+      return 0; // Keep original order for same enabled status
+    });
+    
+    const total = sortedServers.length;
+    const totalPages = Math.ceil(total / limit);
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const data = sortedServers.slice(startIndex, endIndex);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
+  async findByOwnerPaginated(owner: string, page: number, limit: number): Promise<PaginatedResult<ServerConfigWithName>> {
+    const allServers = await this.getAll();
+    const filteredServers = allServers.filter((server) => server.owner === owner);
+    // Sort: enabled servers first, then by creation time
+    const sortedServers = filteredServers.sort((a, b) => {
+      const aEnabled = a.enabled !== false;
+      const bEnabled = b.enabled !== false;
+      if (aEnabled !== bEnabled) {
+        return aEnabled ? -1 : 1;
+      }
+      return 0; // Keep original order for same enabled status
+    });
+    
+    const total = sortedServers.length;
+    const totalPages = Math.ceil(total / limit);
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
+    const data = sortedServers.slice(startIndex, endIndex);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
   async findByOwner(owner: string): Promise<ServerConfigWithName[]> {
     const servers = await this.getAll();
     return servers.filter((server) => server.owner === owner);
@@ -209,6 +293,14 @@ export class ServerDaoImpl extends JsonFileBaseDao implements ServerDao {
     prompts: Record<string, { enabled: boolean; description?: string }>,
   ): Promise<boolean> {
     const result = await this.update(name, { prompts });
+    return result !== null;
+  }
+
+  async updateResources(
+    name: string,
+    resources: Record<string, { enabled: boolean; description?: string }>,
+  ): Promise<boolean> {
+    const result = await this.update(name, { resources });
     return result !== null;
   }
 

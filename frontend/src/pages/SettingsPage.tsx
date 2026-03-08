@@ -378,7 +378,7 @@ const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { servers } = useServerContext();
+  const { allServers: servers } = useServerContext(); // Use allServers for settings (not paginated)
   const { groups } = useGroupData();
 
   const [installConfig, setInstallConfig] = useState<{
@@ -393,14 +393,26 @@ const SettingsPage: React.FC = () => {
 
   const [tempSmartRoutingConfig, setTempSmartRoutingConfig] = useState<{
     dbUrl: string;
+    embeddingProvider: 'openai' | 'azure_openai';
+    embeddingEncodingFormat: 'auto' | 'base64' | 'float';
     openaiApiBaseUrl: string;
     openaiApiKey: string;
     openaiApiEmbeddingModel: string;
+    azureOpenaiEndpoint: string;
+    azureOpenaiApiKey: string;
+    azureOpenaiApiVersion: string;
+    azureOpenaiEmbeddingDeployment: string;
   }>({
     dbUrl: '',
+    embeddingProvider: 'openai',
+    embeddingEncodingFormat: 'auto',
     openaiApiBaseUrl: '',
     openaiApiKey: '',
     openaiApiEmbeddingModel: '',
+    azureOpenaiEndpoint: '',
+    azureOpenaiApiKey: '',
+    azureOpenaiApiVersion: '2024-02-15-preview',
+    azureOpenaiEmbeddingDeployment: '',
   });
 
   const [tempMCPRouterConfig, setTempMCPRouterConfig] = useState<{
@@ -434,8 +446,6 @@ const SettingsPage: React.FC = () => {
 
   const {
     routingConfig,
-    tempRoutingConfig,
-    setTempRoutingConfig,
     installConfig: savedInstallConfig,
     smartRoutingConfig,
     mcpRouterConfig,
@@ -445,7 +455,6 @@ const SettingsPage: React.FC = () => {
     loading,
     bearerKeys,
     updateRoutingConfig,
-    updateRoutingConfigBatch,
     updateInstallConfig,
     updateSmartRoutingConfig,
     updateSmartRoutingConfigBatch,
@@ -472,9 +481,21 @@ const SettingsPage: React.FC = () => {
     if (smartRoutingConfig) {
       setTempSmartRoutingConfig({
         dbUrl: smartRoutingConfig.dbUrl || '',
+        embeddingProvider:
+          smartRoutingConfig.embeddingProvider === 'azure_openai' ? 'azure_openai' : 'openai',
+        embeddingEncodingFormat:
+          smartRoutingConfig.embeddingEncodingFormat === 'base64'
+            ? 'base64'
+            : smartRoutingConfig.embeddingEncodingFormat === 'float'
+              ? 'float'
+              : 'auto',
         openaiApiBaseUrl: smartRoutingConfig.openaiApiBaseUrl || '',
         openaiApiKey: smartRoutingConfig.openaiApiKey || '',
         openaiApiEmbeddingModel: smartRoutingConfig.openaiApiEmbeddingModel || '',
+        azureOpenaiEndpoint: smartRoutingConfig.azureOpenaiEndpoint || '',
+        azureOpenaiApiKey: smartRoutingConfig.azureOpenaiApiKey || '',
+        azureOpenaiApiVersion: smartRoutingConfig.azureOpenaiApiVersion || '2024-02-15-preview',
+        azureOpenaiEmbeddingDeployment: smartRoutingConfig.azureOpenaiEmbeddingDeployment || '',
       });
     }
   }, [smartRoutingConfig]);
@@ -567,37 +588,7 @@ const SettingsPage: React.FC = () => {
       | 'skipAuth',
     value: boolean | string,
   ) => {
-    // If enableBearerAuth is turned on and there's no key, generate one first
-    if (key === 'enableBearerAuth' && value === true) {
-      if (!tempRoutingConfig.bearerAuthKey && !routingConfig.bearerAuthKey) {
-        const newKey = generateRandomKey();
-        handleBearerAuthKeyChange(newKey);
-
-        // Update both enableBearerAuth and bearerAuthKey in a single call
-        const success = await updateRoutingConfigBatch({
-          enableBearerAuth: true,
-          bearerAuthKey: newKey,
-        });
-
-        if (success) {
-          // Update tempRoutingConfig to reflect the saved values
-          setTempRoutingConfig((prev) => ({
-            ...prev,
-            bearerAuthKey: newKey,
-          }));
-        }
-        return;
-      }
-    }
-
     await updateRoutingConfig(key, value);
-  };
-
-  const handleBearerAuthKeyChange = (value: string) => {
-    setTempRoutingConfig((prev) => ({
-      ...prev,
-      bearerAuthKey: value,
-    }));
   };
 
   const handleInstallConfigChange = (
@@ -615,7 +606,17 @@ const SettingsPage: React.FC = () => {
   };
 
   const handleSmartRoutingConfigChange = (
-    key: 'dbUrl' | 'openaiApiBaseUrl' | 'openaiApiKey' | 'openaiApiEmbeddingModel',
+    key:
+      | 'dbUrl'
+      | 'embeddingProvider'
+      | 'embeddingEncodingFormat'
+      | 'openaiApiBaseUrl'
+      | 'openaiApiKey'
+      | 'openaiApiEmbeddingModel'
+      | 'azureOpenaiEndpoint'
+      | 'azureOpenaiApiKey'
+      | 'azureOpenaiApiVersion'
+      | 'azureOpenaiEmbeddingDeployment',
     value: string,
   ) => {
     setTempSmartRoutingConfig({
@@ -721,14 +722,37 @@ const SettingsPage: React.FC = () => {
     // If enabling Smart Routing, validate required fields and save any unsaved changes
     if (value) {
       const currentDbUrl = tempSmartRoutingConfig.dbUrl || smartRoutingConfig.dbUrl;
-      const currentOpenaiApiKey =
-        tempSmartRoutingConfig.openaiApiKey || smartRoutingConfig.openaiApiKey;
+      const missingFields: string[] = [];
+      if (!currentDbUrl) missingFields.push(t('settings.dbUrl') || 'Database URL');
 
-      if (!currentDbUrl || !currentOpenaiApiKey) {
-        const missingFields = [];
-        if (!currentDbUrl) missingFields.push(t('settings.dbUrl'));
-        if (!currentOpenaiApiKey) missingFields.push(t('settings.openaiApiKey'));
+      if (tempSmartRoutingConfig.embeddingProvider === 'azure_openai') {
+        const currentEndpoint =
+          tempSmartRoutingConfig.azureOpenaiEndpoint || smartRoutingConfig.azureOpenaiEndpoint;
+        const currentKey =
+          tempSmartRoutingConfig.azureOpenaiApiKey || smartRoutingConfig.azureOpenaiApiKey;
+        const currentApiVersion =
+          tempSmartRoutingConfig.azureOpenaiApiVersion || smartRoutingConfig.azureOpenaiApiVersion;
+        const currentDeployment =
+          tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment ||
+          smartRoutingConfig.azureOpenaiEmbeddingDeployment;
 
+        if (!currentEndpoint || !currentKey || !currentApiVersion || !currentDeployment) {
+          missingFields.push(
+            t('settings.azureOpenaiEndpoint') || 'Azure OpenAI Endpoint',
+            t('settings.azureOpenaiApiKey') || 'Azure OpenAI API Key',
+            t('settings.azureOpenaiApiVersion') || 'Azure OpenAI API Version',
+            t('settings.azureOpenaiEmbeddingDeployment') || 'Azure Embedding Deployment',
+          );
+        }
+      } else {
+        const currentOpenaiApiKey =
+          tempSmartRoutingConfig.openaiApiKey || smartRoutingConfig.openaiApiKey;
+        if (!currentOpenaiApiKey) {
+          missingFields.push(t('settings.openaiApiKey') || 'OpenAI API Key');
+        }
+      }
+
+      if (missingFields.length > 0) {
         showToast(
           t('settings.smartRoutingValidationError', {
             fields: missingFields.join(', '),
@@ -744,6 +768,15 @@ const SettingsPage: React.FC = () => {
       if (tempSmartRoutingConfig.dbUrl !== smartRoutingConfig.dbUrl) {
         updates.dbUrl = tempSmartRoutingConfig.dbUrl;
       }
+      if (tempSmartRoutingConfig.embeddingProvider !== smartRoutingConfig.embeddingProvider) {
+        updates.embeddingProvider = tempSmartRoutingConfig.embeddingProvider;
+      }
+      if (
+        tempSmartRoutingConfig.embeddingEncodingFormat !==
+        smartRoutingConfig.embeddingEncodingFormat
+      ) {
+        updates.embeddingEncodingFormat = tempSmartRoutingConfig.embeddingEncodingFormat;
+      }
       if (tempSmartRoutingConfig.openaiApiBaseUrl !== smartRoutingConfig.openaiApiBaseUrl) {
         updates.openaiApiBaseUrl = tempSmartRoutingConfig.openaiApiBaseUrl;
       }
@@ -755,6 +788,25 @@ const SettingsPage: React.FC = () => {
         smartRoutingConfig.openaiApiEmbeddingModel
       ) {
         updates.openaiApiEmbeddingModel = tempSmartRoutingConfig.openaiApiEmbeddingModel;
+      }
+
+      if (tempSmartRoutingConfig.azureOpenaiEndpoint !== smartRoutingConfig.azureOpenaiEndpoint) {
+        updates.azureOpenaiEndpoint = tempSmartRoutingConfig.azureOpenaiEndpoint;
+      }
+      if (tempSmartRoutingConfig.azureOpenaiApiKey !== smartRoutingConfig.azureOpenaiApiKey) {
+        updates.azureOpenaiApiKey = tempSmartRoutingConfig.azureOpenaiApiKey;
+      }
+      if (
+        tempSmartRoutingConfig.azureOpenaiApiVersion !== smartRoutingConfig.azureOpenaiApiVersion
+      ) {
+        updates.azureOpenaiApiVersion = tempSmartRoutingConfig.azureOpenaiApiVersion;
+      }
+      if (
+        tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment !==
+        smartRoutingConfig.azureOpenaiEmbeddingDeployment
+      ) {
+        updates.azureOpenaiEmbeddingDeployment =
+          tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment;
       }
 
       // Save all changes in a single batch update
@@ -771,6 +823,14 @@ const SettingsPage: React.FC = () => {
     if (tempSmartRoutingConfig.dbUrl !== smartRoutingConfig.dbUrl) {
       updates.dbUrl = tempSmartRoutingConfig.dbUrl;
     }
+    if (tempSmartRoutingConfig.embeddingProvider !== smartRoutingConfig.embeddingProvider) {
+      updates.embeddingProvider = tempSmartRoutingConfig.embeddingProvider;
+    }
+    if (
+      tempSmartRoutingConfig.embeddingEncodingFormat !== smartRoutingConfig.embeddingEncodingFormat
+    ) {
+      updates.embeddingEncodingFormat = tempSmartRoutingConfig.embeddingEncodingFormat;
+    }
     if (tempSmartRoutingConfig.openaiApiBaseUrl !== smartRoutingConfig.openaiApiBaseUrl) {
       updates.openaiApiBaseUrl = tempSmartRoutingConfig.openaiApiBaseUrl;
     }
@@ -781,6 +841,23 @@ const SettingsPage: React.FC = () => {
       tempSmartRoutingConfig.openaiApiEmbeddingModel !== smartRoutingConfig.openaiApiEmbeddingModel
     ) {
       updates.openaiApiEmbeddingModel = tempSmartRoutingConfig.openaiApiEmbeddingModel;
+    }
+
+    if (tempSmartRoutingConfig.azureOpenaiEndpoint !== smartRoutingConfig.azureOpenaiEndpoint) {
+      updates.azureOpenaiEndpoint = tempSmartRoutingConfig.azureOpenaiEndpoint;
+    }
+    if (tempSmartRoutingConfig.azureOpenaiApiKey !== smartRoutingConfig.azureOpenaiApiKey) {
+      updates.azureOpenaiApiKey = tempSmartRoutingConfig.azureOpenaiApiKey;
+    }
+    if (tempSmartRoutingConfig.azureOpenaiApiVersion !== smartRoutingConfig.azureOpenaiApiVersion) {
+      updates.azureOpenaiApiVersion = tempSmartRoutingConfig.azureOpenaiApiVersion;
+    }
+    if (
+      tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment !==
+      smartRoutingConfig.azureOpenaiEmbeddingDeployment
+    ) {
+      updates.azureOpenaiEmbeddingDeployment =
+        tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -1022,6 +1099,24 @@ const SettingsPage: React.FC = () => {
 
           {sectionsVisible.bearerKeys && (
             <div className="space-y-4 pb-4 px-6">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                <div>
+                  <h3 className="font-medium text-gray-700">
+                    {t('settings.enableBearerAuth') || 'Enable Bearer Authentication'}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {t('settings.enableBearerAuthDescription') ||
+                      'Require bearer token authentication for MCP requests'}
+                  </p>
+                </div>
+                <Switch
+                  disabled={loading}
+                  checked={routingConfig.enableBearerAuth}
+                  onCheckedChange={(checked) =>
+                    handleRoutingConfigChange('enableBearerAuth', checked)
+                  }
+                />
+              </div>
               <div className="flex justify-between items-center">
                 <p className="text-sm text-gray-600">
                   {t('settings.bearerKeysSectionDescription') ||
@@ -1346,6 +1441,13 @@ const SettingsPage: React.FC = () => {
                 />
               </div>
 
+              {/* Smart Routing Required Fields Information */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-sm text-blue-800">
+                  {t('settings.smartRoutingRequiredFields')}
+                </p>
+              </div>
+
               {/* hide when DB_URL env is set */}
               {smartRoutingConfig.dbUrl !== '${DB_URL}' && (
                 <div className="p-3 bg-gray-50 rounded-md">
@@ -1371,58 +1473,235 @@ const SettingsPage: React.FC = () => {
               <div className="p-3 bg-gray-50 rounded-md">
                 <div className="mb-2">
                   <h3 className="font-medium text-gray-700">
-                    <span className="text-red-500 px-1">*</span>
-                    {t('settings.openaiApiKey')}
+                    {t('settings.embeddingProvider') || 'Embedding Provider'}
                   </h3>
                 </div>
                 <div className="flex items-center gap-3">
-                  <input
-                    type="password"
-                    value={tempSmartRoutingConfig.openaiApiKey}
-                    onChange={(e) => handleSmartRoutingConfigChange('openaiApiKey', e.target.value)}
-                    placeholder={t('settings.openaiApiKeyPlaceholder')}
-                    className="flex-1 mt-1 block w-full py-2 px-3 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm border-gray-300"
+                  <select
+                    className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-select"
+                    value={tempSmartRoutingConfig.embeddingProvider}
+                    onChange={(e) =>
+                      handleSmartRoutingConfigChange(
+                        'embeddingProvider',
+                        e.target.value as 'openai' | 'azure_openai',
+                      )
+                    }
                     disabled={loading}
-                  />
+                  >
+                    <option value="openai">OpenAI (or compatible)</option>
+                    <option value="azure_openai">Azure OpenAI</option>
+                  </select>
                 </div>
               </div>
 
-              <div className="p-3 bg-gray-50 rounded-md">
-                <div className="mb-2">
-                  <h3 className="font-medium text-gray-700">{t('settings.openaiApiBaseUrl')}</h3>
-                </div>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={tempSmartRoutingConfig.openaiApiBaseUrl}
-                    onChange={(e) =>
-                      handleSmartRoutingConfigChange('openaiApiBaseUrl', e.target.value)
-                    }
-                    placeholder={t('settings.openaiApiBaseUrlPlaceholder')}
-                    className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
-                    disabled={loading}
-                  />
-                </div>
-              </div>
+              {tempSmartRoutingConfig.embeddingProvider === 'openai' ? (
+                <>
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        <span className="text-red-500 px-1">*</span>
+                        {t('settings.openaiApiKey')}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="password"
+                        value={tempSmartRoutingConfig.openaiApiKey}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('openaiApiKey', e.target.value)
+                        }
+                        placeholder={t('settings.openaiApiKeyPlaceholder')}
+                        className="flex-1 mt-1 block w-full py-2 px-3 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm border-gray-300"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        {t('settings.openaiApiBaseUrl')}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempSmartRoutingConfig.openaiApiBaseUrl}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('openaiApiBaseUrl', e.target.value)
+                        }
+                        placeholder={t('settings.openaiApiBaseUrlPlaceholder')}
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        {t('settings.openaiApiEmbeddingModel')}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempSmartRoutingConfig.openaiApiEmbeddingModel}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('openaiApiEmbeddingModel', e.target.value)
+                        }
+                        placeholder={t('settings.openaiApiEmbeddingModelPlaceholder')}
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        <span className="text-red-500 px-1">*</span>
+                        {t('settings.azureOpenaiEndpoint') || 'Azure OpenAI Endpoint'}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempSmartRoutingConfig.azureOpenaiEndpoint}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('azureOpenaiEndpoint', e.target.value)
+                        }
+                        placeholder={
+                          t('settings.azureOpenaiEndpointPlaceholder') ||
+                          'https://YOUR_RESOURCE_NAME.openai.azure.com'
+                        }
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        <span className="text-red-500 px-1">*</span>
+                        {t('settings.azureOpenaiApiKey') || 'Azure OpenAI API Key'}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="password"
+                        value={tempSmartRoutingConfig.azureOpenaiApiKey}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('azureOpenaiApiKey', e.target.value)
+                        }
+                        placeholder={t('settings.azureOpenaiApiKeyPlaceholder') || '***'}
+                        className="flex-1 mt-1 block w-full py-2 px-3 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm border-gray-300"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        <span className="text-red-500 px-1">*</span>
+                        {t('settings.azureOpenaiApiVersion') || 'Azure OpenAI API Version'}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempSmartRoutingConfig.azureOpenaiApiVersion}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange('azureOpenaiApiVersion', e.target.value)
+                        }
+                        placeholder={
+                          t('settings.azureOpenaiApiVersionPlaceholder') || '2024-02-15-preview'
+                        }
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 rounded-md">
+                    <div className="mb-2">
+                      <h3 className="font-medium text-gray-700">
+                        <span className="text-red-500 px-1">*</span>
+                        {t('settings.azureOpenaiEmbeddingDeployment') ||
+                          'Azure Embedding Deployment'}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        value={tempSmartRoutingConfig.azureOpenaiEmbeddingDeployment}
+                        onChange={(e) =>
+                          handleSmartRoutingConfigChange(
+                            'azureOpenaiEmbeddingDeployment',
+                            e.target.value,
+                          )
+                        }
+                        placeholder={
+                          t('settings.azureOpenaiEmbeddingDeploymentPlaceholder') ||
+                          'your-embedding-deployment-name'
+                        }
+                        className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="p-3 bg-gray-50 rounded-md">
                 <div className="mb-2">
                   <h3 className="font-medium text-gray-700">
-                    {t('settings.openaiApiEmbeddingModel')}
+                    {t('settings.embeddingEncodingFormat')}
                   </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {t('settings.embeddingEncodingFormatDescription')}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={tempSmartRoutingConfig.openaiApiEmbeddingModel}
+                  <select
+                    value={tempSmartRoutingConfig.embeddingEncodingFormat}
                     onChange={(e) =>
-                      handleSmartRoutingConfigChange('openaiApiEmbeddingModel', e.target.value)
+                      handleSmartRoutingConfigChange(
+                        'embeddingEncodingFormat',
+                        e.target.value as 'auto' | 'base64' | 'float',
+                      )
                     }
-                    placeholder={t('settings.openaiApiEmbeddingModelPlaceholder')}
-                    className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-input"
+                    className="flex-1 mt-1 block w-full py-2 px-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm form-select"
                     disabled={loading}
-                  />
+                  >
+                    <option value="auto">
+                      {t('settings.embeddingEncodingFormatAuto') || 'Auto'}
+                    </option>
+                    <option value="base64">Base64</option>
+                    <option value="float">Float</option>
+                  </select>
                 </div>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                <div>
+                  <h3 className="font-medium text-gray-700">
+                    {t('settings.progressiveDisclosure')}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {t('settings.progressiveDisclosureDescription')}
+                  </p>
+                </div>
+                <Switch
+                  disabled={loading || !smartRoutingConfig.enabled}
+                  checked={smartRoutingConfig.progressiveDisclosure}
+                  onCheckedChange={(checked) =>
+                    updateSmartRoutingConfig('progressiveDisclosure', checked)
+                  }
+                />
               </div>
 
               <div className="flex justify-end pt-2">

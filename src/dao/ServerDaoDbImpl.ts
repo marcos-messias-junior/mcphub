@@ -1,4 +1,4 @@
-import { ServerDao, ServerConfigWithName } from './index.js';
+import { ServerDao, ServerConfigWithName, PaginatedResult } from './index.js';
 import { ServerRepository } from '../db/repositories/ServerRepository.js';
 
 /**
@@ -16,6 +16,39 @@ export class ServerDaoDbImpl implements ServerDao {
     return servers.map((s) => this.mapToServerConfig(s));
   }
 
+  async findAllPaginated(
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<ServerConfigWithName>> {
+    const { data, total } = await this.repository.findAllPaginated(page, limit);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: data.map((s) => this.mapToServerConfig(s)),
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
+  async findByOwnerPaginated(
+    owner: string,
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<ServerConfigWithName>> {
+    const { data, total } = await this.repository.findByOwnerPaginated(owner, page, limit);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: data.map((s) => this.mapToServerConfig(s)),
+      total,
+      page,
+      limit,
+      totalPages,
+    };
+  }
+
   async findById(name: string): Promise<ServerConfigWithName | null> {
     const server = await this.repository.findByName(name);
     return server ? this.mapToServerConfig(server) : null;
@@ -25,6 +58,7 @@ export class ServerDaoDbImpl implements ServerDao {
     const server = await this.repository.create({
       name: entity.name,
       type: entity.type,
+      description: entity.description,
       url: entity.url,
       command: entity.command,
       args: entity.args,
@@ -36,8 +70,10 @@ export class ServerDaoDbImpl implements ServerDao {
       keepAliveInterval: entity.keepAliveInterval,
       tools: entity.tools,
       prompts: entity.prompts,
+      resources: entity.resources,
       options: entity.options,
       oauth: entity.oauth,
+      proxy: entity.proxy,
       openapi: entity.openapi,
     });
     return this.mapToServerConfig(server);
@@ -49,6 +85,7 @@ export class ServerDaoDbImpl implements ServerDao {
   ): Promise<ServerConfigWithName | null> {
     const server = await this.repository.update(name, {
       type: entity.type,
+      description: entity.description,
       url: entity.url,
       command: entity.command,
       args: entity.args,
@@ -60,8 +97,10 @@ export class ServerDaoDbImpl implements ServerDao {
       keepAliveInterval: entity.keepAliveInterval,
       tools: entity.tools,
       prompts: entity.prompts,
+      resources: entity.resources,
       options: entity.options,
       oauth: entity.oauth,
+      proxy: entity.proxy,
       openapi: entity.openapi,
     });
     return server ? this.mapToServerConfig(server) : null;
@@ -115,6 +154,14 @@ export class ServerDaoDbImpl implements ServerDao {
     return result !== null;
   }
 
+  async updateResources(
+    name: string,
+    resources: Record<string, { enabled: boolean; description?: string }>,
+  ): Promise<boolean> {
+    const result = await this.update(name, { resources });
+    return result !== null;
+  }
+
   async rename(oldName: string, newName: string): Promise<boolean> {
     // Check if newName already exists
     if (await this.repository.exists(newName)) {
@@ -127,6 +174,7 @@ export class ServerDaoDbImpl implements ServerDao {
   private mapToServerConfig(server: {
     name: string;
     type?: string;
+    description?: string;
     url?: string;
     command?: string;
     args?: string[];
@@ -138,13 +186,16 @@ export class ServerDaoDbImpl implements ServerDao {
     keepAliveInterval?: number;
     tools?: Record<string, { enabled: boolean; description?: string }>;
     prompts?: Record<string, { enabled: boolean; description?: string }>;
+    resources?: Record<string, { enabled: boolean; description?: string }>;
     options?: Record<string, any>;
     oauth?: Record<string, any>;
+    proxy?: Record<string, any>;
     openapi?: Record<string, any>;
   }): ServerConfigWithName {
     return {
       name: server.name,
       type: server.type as 'stdio' | 'sse' | 'streamable-http' | 'openapi' | undefined,
+      description: server.description,
       url: server.url,
       command: server.command,
       args: server.args,
@@ -156,8 +207,10 @@ export class ServerDaoDbImpl implements ServerDao {
       keepAliveInterval: server.keepAliveInterval,
       tools: server.tools,
       prompts: server.prompts,
+      resources: server.resources,
       options: server.options,
       oauth: server.oauth,
+      proxy: server.proxy,
       openapi: server.openapi,
     };
   }

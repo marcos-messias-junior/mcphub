@@ -7,9 +7,22 @@ import { getSystemConfigDao } from '../dao/DaoFactory.js';
 export interface SmartRoutingConfig {
   enabled: boolean;
   dbUrl: string;
+  embeddingProvider?: 'openai' | 'azure_openai';
+  embeddingEncodingFormat?: 'auto' | 'base64' | 'float';
   openaiApiBaseUrl: string;
   openaiApiKey: string;
   openaiApiEmbeddingModel: string;
+  azureOpenaiEndpoint?: string;
+  azureOpenaiApiKey?: string;
+  azureOpenaiApiVersion?: string;
+  azureOpenaiEmbeddingDeployment?: string;
+  /**
+   * When enabled, search_tools returns only tool name and description (without full inputSchema).
+   * A new describe_tool endpoint is provided to get the full tool schema on demand.
+   * This reduces token usage for AI clients that don't need all tool parameters upfront.
+   * Default: false (returns full tool schemas in search_tools for backward compatibility)
+   */
+  progressiveDisclosure?: boolean;
 }
 
 /**
@@ -17,7 +30,7 @@ export interface SmartRoutingConfig {
  *
  * Priority order for each setting:
  * 1. Specific environment variables (ENABLE_SMART_ROUTING, SMART_ROUTING_ENABLED, etc.)
- * 2. Generic environment variables (OPENAI_API_KEY, DATABASE_URL, etc.)
+ * 2. Generic environment variables (OPENAI_API_KEY, DB_URL, etc.)
  * 3. Settings configuration (systemConfig.smartRouting)
  * 4. Default values
  *
@@ -41,6 +54,36 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
     // Database configuration
     dbUrl: getConfigValue([process.env.DB_URL], smartRoutingSettings.dbUrl, '', expandEnvVars),
 
+    embeddingProvider: getConfigValue(
+      [process.env.SMART_ROUTING_EMBEDDING_PROVIDER],
+      smartRoutingSettings.embeddingProvider,
+      'openai',
+      (value: any) => {
+        const normalized = String(value || '')
+          .trim()
+          .toLowerCase();
+        if (normalized === 'azure' || normalized === 'azure_openai') {
+          return 'azure_openai';
+        }
+        return 'openai';
+      },
+    ),
+
+    embeddingEncodingFormat: getConfigValue(
+      [process.env.SMART_ROUTING_EMBEDDING_ENCODING_FORMAT],
+      smartRoutingSettings.embeddingEncodingFormat,
+      'auto',
+      (value: any) => {
+        const normalized = String(value || '')
+          .trim()
+          .toLowerCase();
+        if (normalized === 'base64' || normalized === 'float') {
+          return normalized;
+        }
+        return 'auto';
+      },
+    ),
+
     // OpenAI API configuration
     openaiApiBaseUrl: getConfigValue(
       [process.env.OPENAI_API_BASE_URL],
@@ -57,10 +100,47 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
     ),
 
     openaiApiEmbeddingModel: getConfigValue(
-      [process.env.OPENAI_API_EMBEDDING_MODEL],
+      [process.env.EMBEDDING_MODEL],
       smartRoutingSettings.openaiApiEmbeddingModel,
       'text-embedding-3-small',
       expandEnvVars,
+    ),
+
+    azureOpenaiEndpoint: getConfigValue(
+      [process.env.AZURE_OPENAI_ENDPOINT],
+      smartRoutingSettings.azureOpenaiEndpoint,
+      '',
+      expandEnvVars,
+    ),
+
+    azureOpenaiApiKey: getConfigValue(
+      [process.env.AZURE_OPENAI_API_KEY],
+      smartRoutingSettings.azureOpenaiApiKey,
+      '',
+      expandEnvVars,
+    ),
+
+    azureOpenaiApiVersion: getConfigValue(
+      [process.env.AZURE_OPENAI_API_VERSION],
+      smartRoutingSettings.azureOpenaiApiVersion,
+      '2024-02-15-preview',
+      expandEnvVars,
+    ),
+
+    azureOpenaiEmbeddingDeployment: getConfigValue(
+      [process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT],
+      smartRoutingSettings.azureOpenaiEmbeddingDeployment,
+      '',
+      expandEnvVars,
+    ),
+
+    // Progressive disclosure - when enabled, search_tools returns minimal info
+    // and describe_tool is used to get full schema
+    progressiveDisclosure: getConfigValue(
+      [process.env.SMART_ROUTING_PROGRESSIVE_DISCLOSURE],
+      smartRoutingSettings.progressiveDisclosure,
+      false,
+      parseBooleanEnvVar,
     ),
   };
 }
